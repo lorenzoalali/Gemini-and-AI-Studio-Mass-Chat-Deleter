@@ -14,7 +14,9 @@
  * =======================================================================
  * --- DISCLAIMER & IMPORTANT INFORMATION ---
  *
- * This tool can be found on https://github.com/lorenzoalali/Google-AI-Studio-Bulk-Delete-UserScript
+ * This tool can be found
+ * on GitHub https://github.com/lorenzoalali/Google-AI-Studio-Bulk-Delete-UserScript
+ * and on Greasy Fork https://greasyfork.org/en/scripts/555870-google-ai-studio-bulk-delete
  *
  * --- HOW THIS SCRIPT WORKS ---
  * This script enhances the Google AI Studio library by adding bulk deletion capabilities.
