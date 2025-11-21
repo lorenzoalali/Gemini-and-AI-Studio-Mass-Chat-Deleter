@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v2
+// @version      2025-11-21-v3
 // @description  Bulk delete (mass-remove) chats from Gemini in batch.
 // @author       Lorenzo Alali
 // @match        https://gemini.google.com/*
@@ -119,13 +119,13 @@
 
     async function startBulkDelete() {
         // Verify Sidebar visibility before starting
-        const historyContainerCheck = document.querySelector('div.conversation-items-container');
+        const historyContainerCheck = document.querySelector('div.conversations-container');
         if (!historyContainerCheck) {
             alert("Error: Chat history is not visible.\n\nPlease open the sidebar (click the Menu icon ☰ top-left) to load the chat list, then try again.");
             return;
         }
 
-        if (!confirm("Are you sure you want to permanently delete all chats visible in the sidebar?")) {
+        if (!confirm("Are you sure you want to permanently delete all chats visible in the sidebar?\n\n(Pinned chats & Gems will be preserved)")) {
             return;
         }
 
@@ -141,7 +141,7 @@
         while (deletionInProgress) {
             try {
                 // 1. Find the container holding the list (Re-query every loop in case of DOM refresh)
-                const historyContainer = document.querySelector('div.conversation-items-container');
+                const historyContainer = document.querySelector('div.conversations-container');
 
                 if (!historyContainer) {
                     GM_log("✅ History container not found. Assuming list is empty.");
@@ -156,16 +156,32 @@
                     break;
                 }
 
-                const actionContainer = chatItems[0];
+                // Find the first NON-PINNED chat
+                let targetActionContainer = null;
+                for (const item of chatItems) {
+                    // The chat title/link is usually the previous sibling of the actions container
+                    const previousSibling = item.previousElementSibling;
+                    const isPinned = previousSibling && previousSibling.querySelector('.conversation-pin-icon');
+
+                    if (!isPinned) {
+                        targetActionContainer = item;
+                        break; // Found one to delete
+                    }
+                }
+
+                if (!targetActionContainer) {
+                    GM_log("✅ No more non-pinned chats found.");
+                    break;
+                }
 
                 // Force visibility
-                actionContainer.style.visibility = 'visible';
-                actionContainer.style.opacity = '1';
+                targetActionContainer.style.visibility = 'visible';
+                targetActionContainer.style.opacity = '1';
 
-                const optionsButton = actionContainer.querySelector('button[data-test-id="actions-menu-button"]');
+                const optionsButton = targetActionContainer.querySelector('button[data-test-id="actions-menu-button"]');
 
                 if (!optionsButton) {
-                    chatItems[0].remove(); // Remove stuck element
+                    targetActionContainer.remove(); // Remove stuck element
                     continue;
                 }
 
@@ -213,7 +229,7 @@
         if (successCount > 0 || failureCount > 0) {
             alert(`Deletion Complete!\n\n✅ Deleted: ${successCount}\n❌ Errors: ${failureCount}`);
         } else {
-            alert("No chats found to delete.");
+            alert("No chats found to delete (or all remaining chats are pinned).");
         }
     }
 
@@ -253,7 +269,7 @@
         startBtn.id = 'start-delete-btn';
         startBtn.className = 'bulk-delete-btn btn-red';
         startBtn.innerHTML = '<span class="bulk-delete-emoji">🔥</span>&nbsp;Delete All';
-        startBtn.title = "Delete all chats in sidebar";
+        startBtn.title = "Delete all chats in sidebar (except pinned chats & Gems)";
         startBtn.onclick = startBulkDelete;
 
         // Stop Button

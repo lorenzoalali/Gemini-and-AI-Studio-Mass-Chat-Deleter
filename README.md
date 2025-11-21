@@ -13,6 +13,7 @@ These scripts provide a "Delete All" and "Delete Selected" experience, functioni
 *   **Smart DOM Interaction:** Deletes items sequentially without requiring a full page reload for every action.
 *   **Safety Stop:** A visible "Stop" button allows you to halt the automated deletion process instantly.
 *   **Status Indicators:** Visual emojis indicate when the bulk removal is in progress.
+*   **Preserve Gems & Pinned Chats:** Automatically detects and skips pinned chats, ensuring your important conversations are safe. Only standard chats are deleted, your Gems will be preserved.
 
 ### Google AI Studio Bulk Delete
 *   **Batch Deletion:** Wipes the entire library by deleting items in batches and auto-reloading until empty.
