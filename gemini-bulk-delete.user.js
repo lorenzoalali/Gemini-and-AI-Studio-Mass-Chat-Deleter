@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v6-select-delete
+// @version      2025-11-21-v7-eod
 // @description  Bulk delete (mass-remove) chats from Gemini in batch. Select specific chats or delete all.
 // @author       Lorenzo Alali
 // @match        https://gemini.google.com/*
@@ -51,7 +51,7 @@
             align-items: center;
             justify-content: center;
             gap: 8px;
-            padding: 8px 16px;
+            padding: 8px 12px;
             border: none;
             border-radius: 8px;
             font-family: 'Google Sans', Roboto, Arial, sans-serif;
@@ -62,6 +62,8 @@
             box-shadow: 0 1px 3px rgba(0,0,0,0.2);
             transition: background-color 0.2s, filter 0.2s, opacity 0.2s;
             height: 36px; /* Match Gemini header button height */
+            white-space: nowrap; /* Prevent text wrapping */
+            flex-shrink: 0; /* Prevent button from shrinking */
         }
         .bulk-delete-btn:hover {
             filter: brightness(0.9);
@@ -123,12 +125,21 @@
             flex: 1 !important;
             min-width: 0 !important; /* Critical for text truncation in flex containers */
         }
+        
+        /* Highlight for Dry Run */
+        .bulk-delete-highlight {
+            background-color: rgba(242, 153, 0, 0.2) !important;
+            border: 2px dashed #F29900 !important;
+            border-radius: 4px;
+        }
     `;
     GM_addStyle(css);
 
     // --- State Variable ---
     let deletionInProgress = false;
     let selectedChats = new Set(); // Store DOM elements or IDs of selected chats
+    let lastCheckedCheckbox = null; // For Range Selection
+
 
     // --- UI Helper & Styles ---
     const UI = {
@@ -238,6 +249,67 @@
                     color: white;
                 }
                 .gas-btn.danger:hover { background: #a50e0e; }
+                .gas-btn.secondary {
+                    background: white;
+                    color: #3c4043;
+                    border: 1px solid #dadce0;
+                }
+                .gas-btn.secondary:hover {
+                    background: #f1f3f4;
+                    border-color: #dadce0;
+                }
+
+                /* Progress Bar Styles */
+                .gas-progress-container {
+                    position: fixed;
+                    bottom: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 10000;
+                    background: #333;
+                    color: #fff;
+                    padding: 16px 24px;
+                    border-radius: 12px;
+                    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+                    display: flex;
+                    flex-direction: column;
+                    gap: 12px;
+                    min-width: 320px;
+                    opacity: 0;
+                    transform: translate(-50%, 20px);
+                    transition: opacity 0.3s, transform 0.3s;
+                    pointer-events: auto;
+                }
+                .gas-progress-container.visible {
+                    opacity: 1;
+                    transform: translate(-50%, 0);
+                }
+                .gas-progress-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    font-size: 14px;
+                    font-weight: 500;
+                }
+                .gas-progress-bar-bg {
+                    width: 100%;
+                    height: 6px;
+                    background: rgba(255,255,255,0.2);
+                    border-radius: 3px;
+                    overflow: hidden;
+                }
+                .gas-progress-bar-fill {
+                    height: 100%;
+                    background: #4285f4; /* Google Blue */
+                    width: 0%;
+                    transition: width 0.3s ease-out;
+                }
+                .gas-progress-details {
+                    font-size: 12px;
+                    color: rgba(255,255,255,0.7);
+                    text-align: right;
+                }
             `;
             document.head.appendChild(style);
         },
@@ -289,7 +361,7 @@
                     <div class="gas-modal-title">${title}</div>
                     <div class="gas-modal-content">${message}</div>
                     <div class="gas-modal-actions">
-                        <button class="gas-btn cancel-btn">Cancel</button>
+                        <button class="gas-btn secondary cancel-btn">Cancel</button>
                         <button class="gas-btn ${confirmType} confirm-btn">${confirmText}</button>
                     </div>
                 `;
@@ -313,6 +385,115 @@
                 overlay.addEventListener('click', (e) => {
                     if (e.target === overlay) close(false);
                 });
+            });
+        },
+
+        showProgress: (message, total) => {
+            UI.injectStyles();
+            // Remove existing if any
+            UI.hideProgress();
+
+            const container = document.createElement('div');
+            container.className = 'gas-progress-container';
+            container.id = 'gas-progress-ui';
+
+            container.innerHTML = `
+                <div class="gas-progress-header">
+                    <span id="gas-progress-text">${message}</span>
+                    <span id="gas-progress-percent">0%</span>
+                </div>
+                <div class="gas-progress-bar-bg">
+                    <div class="gas-progress-bar-fill" id="gas-progress-fill"></div>
+                </div>
+                <div class="gas-progress-details" id="gas-progress-count">0 of ${total}</div>
+            `;
+
+            document.body.appendChild(container);
+
+            // Trigger reflow
+            container.offsetHeight;
+            container.classList.add('visible');
+        },
+
+        updateProgress: (current, total, textOverride = null) => {
+            const container = document.getElementById('gas-progress-ui');
+            if (!container) return;
+
+            const percentage = Math.min(100, Math.round((current / total) * 100));
+
+            const fill = document.getElementById('gas-progress-fill');
+            const percentText = document.getElementById('gas-progress-percent');
+            const countText = document.getElementById('gas-progress-count');
+            const mainText = document.getElementById('gas-progress-text');
+
+            if (fill) fill.style.width = `${percentage}%`;
+            if (percentText) percentText.textContent = `${percentage}%`;
+            if (countText) countText.textContent = `${current} of ${total}`;
+            if (textOverride && mainText) mainText.textContent = textOverride;
+        },
+
+        hideProgress: () => {
+            const container = document.getElementById('gas-progress-ui');
+            if (container) {
+                container.classList.remove('visible');
+                setTimeout(() => container.remove(), 300);
+            }
+        },
+
+        showUndoToast: (seconds) => {
+            UI.injectStyles();
+            return new Promise((resolve, reject) => {
+                let container = document.querySelector('.gas-toast-container');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.className = 'gas-toast-container';
+                    document.body.appendChild(container);
+                }
+
+                const toast = document.createElement('div');
+                toast.className = 'gas-toast warning';
+                toast.id = 'gas-undo-toast';
+
+                let remaining = seconds;
+
+                const updateText = () => {
+                    toast.innerHTML = `
+                        <span>⏳</span>
+                        <span style="flex:1">Starting deletion in ${remaining}s...</span>
+                        <button id="gas-undo-cancel" style="background:transparent;border:1px solid white;color:white;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:12px;">CANCEL</button>
+                    `;
+                };
+
+                updateText();
+                container.appendChild(toast);
+
+                // Trigger reflow
+                toast.offsetHeight;
+                toast.classList.add('visible');
+
+                const interval = setInterval(() => {
+                    remaining--;
+                    if (remaining <= 0) {
+                        clearInterval(interval);
+                        toast.classList.remove('visible');
+                        setTimeout(() => toast.remove(), 300);
+                        resolve(true); // Timer finished
+                    } else {
+                        updateText();
+                        // Re-attach listener because innerHTML wiped it
+                        document.getElementById('gas-undo-cancel').addEventListener('click', handleCancel);
+                    }
+                }, 1000);
+
+                const handleCancel = () => {
+                    clearInterval(interval);
+                    toast.classList.remove('visible');
+                    setTimeout(() => toast.remove(), 300);
+                    resolve(false); // Cancelled
+                };
+
+                // Initial listener
+                toast.querySelector('#gas-undo-cancel').addEventListener('click', handleCancel);
             });
         }
     };
@@ -353,6 +534,7 @@
         return new Promise(resolve => setTimeout(resolve, ms));
     }
 
+
     // --- Checkbox Injection Logic ---
 
     function injectCheckboxes() {
@@ -361,7 +543,7 @@
 
         const chatItems = Array.from(historyContainer.querySelectorAll('.conversation-actions-container'));
 
-        chatItems.forEach(item => {
+        chatItems.forEach((item, index) => {
             // Check if we already injected a checkbox
             if (item.parentElement.querySelector('.bulk-delete-checkbox')) return;
 
@@ -376,31 +558,146 @@
             const checkbox = document.createElement('input');
             checkbox.type = 'checkbox';
             checkbox.className = 'bulk-delete-checkbox';
-            checkbox.title = "Select for deletion";
+            checkbox.title = "Select for deletion (Shift+Click to select range)";
+            checkbox.dataset.index = index; // Store index for range selection
 
             // Event listener for selection
-            checkbox.addEventListener('change', (e) => {
-                if (e.target.checked) {
-                    selectedChats.add(item);
+            checkbox.addEventListener('click', (e) => {
+                // Handle Range Selection (Shift + Click)
+                if (e.shiftKey && lastCheckedCheckbox && lastCheckedCheckbox !== checkbox) {
+                    const allCheckboxes = Array.from(document.querySelectorAll('.bulk-delete-checkbox'));
+                    const start = allCheckboxes.indexOf(lastCheckedCheckbox);
+                    const end = allCheckboxes.indexOf(checkbox);
+
+                    if (start !== -1 && end !== -1) {
+                        const low = Math.min(start, end);
+                        const high = Math.max(start, end);
+
+                        for (let i = low; i <= high; i++) {
+                            const cb = allCheckboxes[i];
+                            cb.checked = lastCheckedCheckbox.checked; // Match the state of the first clicked
+
+                            // Find the associated chat item (parent's sibling logic)
+                            // The checkbox is inserted before the link, which is before the actions container.
+                            // Structure: [Checkbox] [Link] [Actions]
+                            // We need to find [Actions] to add to selectedChats
+                            // The actions container is the NEXT sibling of the NEXT sibling of the checkbox (Checkbox -> Link -> Actions)
+                            // OR Checkbox -> Actions (if link missing/different structure)
+
+                            // Let's rely on the fact that we injected it into the parent.
+                            // We can find the actions container by looking for .conversation-actions-container in the parent
+                            const actions = cb.parentElement.querySelector('.conversation-actions-container');
+                            if (actions) {
+                                if (cb.checked) {
+                                    selectedChats.add(actions);
+                                } else {
+                                    selectedChats.delete(actions);
+                                }
+                            }
+                        }
+                    }
                 } else {
-                    selectedChats.delete(item);
+                    // Normal Click
+                    if (e.target.checked) {
+                        selectedChats.add(item);
+                    } else {
+                        selectedChats.delete(item);
+                    }
                 }
+
+                lastCheckedCheckbox = checkbox;
                 updateButtonState();
             });
 
             // Insert before the chat link (which is usually the previous sibling of the actions container)
-            // Structure: [Link/Title] [Actions Container]
-            // We want: [Checkbox] [Link/Title] [Actions Container]
-            // So we insert before the previousSibling (Link)
             if (previousSibling) {
                 previousSibling.parentElement.insertBefore(checkbox, previousSibling);
                 previousSibling.parentElement.classList.add('gemini-bulk-delete-row');
             } else {
-                // Fallback if structure is weird
                 item.parentElement.insertBefore(checkbox, item);
                 item.parentElement.classList.add('gemini-bulk-delete-row');
             }
         });
+    }
+
+    function toggleSelectAll(shouldSelect) {
+        const allCheckboxes = document.querySelectorAll('.bulk-delete-checkbox');
+        allCheckboxes.forEach(cb => {
+            cb.checked = shouldSelect;
+            const actions = cb.parentElement.querySelector('.conversation-actions-container');
+            if (actions) {
+                if (shouldSelect) {
+                    selectedChats.add(actions);
+                } else {
+                    selectedChats.delete(actions);
+                }
+            }
+        });
+        updateButtonState();
+    }
+
+    async function loadAllChats() {
+        const historyContainer = document.querySelector('div.conversations-container');
+        if (!historyContainer) {
+            UI.showToast("Sidebar not found!", 'error');
+            return;
+        }
+
+        UI.showToast("Scrolling to load all chats...", 'info');
+        let previousHeight = 0;
+        let currentHeight = historyContainer.scrollHeight;
+        let attempts = 0;
+
+        while (previousHeight !== currentHeight && attempts < 50) { // Max 50 scrolls to prevent infinite loop
+            previousHeight = currentHeight;
+            historyContainer.scrollTop = currentHeight;
+            await sleep(800); // Wait for load
+            currentHeight = historyContainer.scrollHeight;
+            attempts++;
+        }
+
+        UI.showToast("Finished loading chats.", 'success');
+        // Re-inject checkboxes for newly loaded items
+        injectCheckboxes();
+    }
+
+    function simulateDelete() {
+        const mode = selectedChats.size > 0 ? 'SELECTED' : 'ALL';
+        let targets = [];
+
+        if (mode === 'SELECTED') {
+            targets = Array.from(selectedChats);
+        } else {
+            const historyContainer = document.querySelector('div.conversations-container');
+            if (historyContainer) {
+                const allChats = Array.from(historyContainer.querySelectorAll('.conversation-actions-container'));
+                targets = allChats.filter(item => {
+                    const previousSibling = item.previousElementSibling;
+                    const isPinned = previousSibling && previousSibling.querySelector('.conversation-pin-icon');
+                    return !isPinned;
+                });
+            }
+        }
+
+        if (targets.length === 0) {
+            UI.showToast("No chats to simulate.", 'warning');
+            return;
+        }
+
+        // Highlight
+        targets.forEach(el => {
+            // Highlight the whole row
+            el.parentElement.classList.add('bulk-delete-highlight');
+        });
+
+        UI.showToast(`DRY RUN: Would delete ${targets.length} chat(s).`, 'info', 4000);
+
+        // Remove highlight after 4 seconds
+        setTimeout(() => {
+            targets.forEach(el => {
+                el.parentElement.classList.remove('bulk-delete-highlight');
+            });
+        }, 4000);
     }
 
     // --- Core Deletion Logic ---
@@ -440,6 +737,13 @@
 
         if (!userConfirmation) return;
 
+        // Undo Timer
+        const proceed = await UI.showUndoToast(5); // 5 seconds
+        if (!proceed) {
+            UI.showToast("Deletion Cancelled.", 'info');
+            return;
+        }
+
         if (deletionInProgress) return;
         deletionInProgress = true;
         updateButtonState();
@@ -451,14 +755,34 @@
 
         // Create a list of items to process
         let itemsToProcess = [];
+        let totalItemsToProcess = 0;
+
         if (mode === 'SELECTED') {
             itemsToProcess = Array.from(selectedChats);
+            totalItemsToProcess = itemsToProcess.length;
         } else {
             // For ALL mode, we'll dynamically query, but we can start by clearing selection
             selectedChats.clear();
             // Uncheck all checkboxes visually
             document.querySelectorAll('.bulk-delete-checkbox').forEach(cb => cb.checked = false);
+
+            // Estimate total for progress bar
+            const historyContainer = document.querySelector('div.conversations-container');
+            if (historyContainer) {
+                const allChats = Array.from(historyContainer.querySelectorAll('.conversation-actions-container'));
+                // Filter out pinned
+                const deletableChats = allChats.filter(item => {
+                    const previousSibling = item.previousElementSibling;
+                    const isPinned = previousSibling && previousSibling.querySelector('.conversation-pin-icon');
+                    return !isPinned;
+                });
+                totalItemsToProcess = deletableChats.length;
+            }
         }
+
+        // Initialize Progress Bar
+        UI.showProgress("Deletion in progress...", totalItemsToProcess);
+        let processedCount = 0;
 
         while (deletionInProgress) {
             try {
@@ -474,6 +798,8 @@
                     // Verify it still exists in DOM
                     if (!document.body.contains(targetActionContainer)) {
                         GM_log("⚠️ Item no longer in DOM, skipping.");
+                        processedCount++;
+                        UI.updateProgress(processedCount, totalItemsToProcess);
                         continue;
                     }
                 } else {
@@ -534,7 +860,11 @@
                 await sleep(1200);
 
                 successCount++;
+                processedCount++;
                 consecutiveFailures = 0;
+
+                // Update Progress
+                UI.updateProgress(processedCount, totalItemsToProcess, `Deleting ${processedCount} of ${totalItemsToProcess}...`);
 
                 // If in SELECTED mode, remove the checkbox/row from UI if it wasn't automatically removed
                 if (mode === 'SELECTED') {
@@ -547,7 +877,10 @@
             } catch (error) {
                 GM_log(`❌ Error: ${error.message}`);
                 failureCount++;
+                processedCount++; // Count failure as processed so bar keeps moving
                 consecutiveFailures++;
+
+                UI.updateProgress(processedCount, totalItemsToProcess, `Error on item ${processedCount}...`);
 
                 if (consecutiveFailures > 5) {
                     UI.showToast("Too many consecutive errors. Stopping.", 'error');
@@ -562,6 +895,7 @@
         deletionInProgress = false;
         selectedChats.clear(); // Clear selection after operation
         updateButtonState();
+        UI.hideProgress(); // Hide progress bar
 
         if (successCount > 0 || failureCount > 0) {
             UI.showToast(`Deletion Complete! Deleted: ${successCount}, Errors: ${failureCount}`, 'success', 5000);
@@ -601,6 +935,37 @@
         const container = document.createElement('div');
         container.id = 'bulk-delete-controls';
 
+        // Select All Checkbox
+        const selectAllContainer = document.createElement('div');
+        selectAllContainer.style.display = 'flex';
+        selectAllContainer.style.alignItems = 'center';
+        selectAllContainer.title = "Select All Visible";
+
+        const selectAllCheckbox = document.createElement('input');
+        selectAllCheckbox.type = 'checkbox';
+        selectAllCheckbox.className = 'bulk-delete-checkbox';
+        selectAllCheckbox.style.marginRight = '0';
+        selectAllCheckbox.style.marginLeft = '8px';
+        selectAllCheckbox.addEventListener('change', (e) => toggleSelectAll(e.target.checked));
+
+        selectAllContainer.appendChild(selectAllCheckbox);
+
+        // Load All Button
+        const loadAllBtn = document.createElement('button');
+        loadAllBtn.className = 'bulk-delete-btn btn-blue';
+        loadAllBtn.innerHTML = '<span class="bulk-delete-emoji">⬇️</span>';
+        loadAllBtn.title = "Scroll down to load all chats";
+        loadAllBtn.style.padding = "8px 12px";
+        loadAllBtn.onclick = loadAllChats;
+
+        // Simulate Button (Dry Run)
+        const simulateBtn = document.createElement('button');
+        simulateBtn.className = 'bulk-delete-btn btn-orange';
+        simulateBtn.innerHTML = '<span class="bulk-delete-emoji">🧪</span>';
+        simulateBtn.title = "Simulate Deletion (Dry Run)";
+        simulateBtn.style.padding = "8px 12px";
+        simulateBtn.onclick = simulateDelete;
+
         // Delete Selected Button
         const deleteSelectedBtn = document.createElement('button');
         deleteSelectedBtn.id = 'delete-selected-btn';
@@ -626,6 +991,9 @@
         stopBtn.style.display = 'none';
         stopBtn.onclick = stopBulkDelete;
 
+        container.appendChild(selectAllContainer);
+        container.appendChild(loadAllBtn);
+        container.appendChild(simulateBtn);
         container.appendChild(deleteSelectedBtn);
         container.appendChild(startBtn);
         container.appendChild(stopBtn);

@@ -14,13 +14,25 @@ These scripts provide a "Delete All" and "Delete Selected" experience, functioni
 *   **Smart DOM Interaction:** Deletes items sequentially without requiring a full page reload for every action.
 *   **Safety Stop:** A visible "Stop" button allows you to halt the automated deletion process instantly.
 *   **Status Indicators:** Visual emojis indicate when the bulk removal is in progress.
+*   **Visual Progress Bar:** Real-time progress indicator showing "Deleting X of Y..." with a percentage bar.
+*   **Range Selection:** Use `Shift + Click` to select a range of chats instantly.
+*   **Select All:** A master checkbox to select all currently visible chats.
+*   **Auto-Scroll & Load:** A "Load All" button (⬇️) to automatically scroll to the bottom of your history.
+*   **Dry Run Mode:** A "Simulate" button (🧪) to visualize what would be deleted without taking action.
+*   **Undo Timer:** A 5-second countdown with a "Cancel" option before deletion starts.
 *   **Preserve Gems & Pinned Chats:** Automatically detects and skips pinned chats, ensuring your important conversations are safe. Only standard chats are deleted, your Gems will be preserved.
+
 
 ### Google AI Studio Bulk Delete
 *   **Batch Deletion:** Wipes the entire library by deleting items in batches and auto-reloading until empty.
 *   **Select & Delete:** Adds checkboxes to the interface, allowing for specific mass deletion of selected items.
 *   **Master Checkbox:** Select or deselect all visible rows for quick bulk removal.
 *   **Auto-Recovery:** Automatically resumes the cleaning process after page reloads to handle large libraries.
+*   **Range Selection:** Use `Shift + Click` to select a range of items instantly.
+*   **Dry Run Mode:** A "Simulate" button (🧪) to visualize what would be deleted without taking action.
+*   **Undo Timer:** A 5-second countdown with a "Cancel" option before deletion starts.
+*   **Visual Progress Bar:** Persistent progress bar that tracks deletion status across page reloads.
+
 
 ## 📥 Download & Installation
 To use these tools, you need a UserScript manager such as **Tampermonkey**.

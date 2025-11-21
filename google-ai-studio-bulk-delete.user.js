@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google AI Studio Bulk Delete
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v5-greasy
+// @version      2025-11-21-v7-eod
 // @description  Bulk delete (mass-remove) chats from Google AI Studio in batch.
 // @author       Lorenzo Alali
 // @match        https://aistudio.google.com/*
@@ -42,9 +42,12 @@
     const aBULK_DELETE_SELECTED_KEY = 'isAiStudioBulkDeletingSelected';
     const aBULK_DELETE_SUCCESS_KEY = 'aiStudioBulkDeleteSuccessCount';
     const aBULK_DELETE_FAIL_KEY = 'aiStudioBulkDeleteFailCount';
+    const aBULK_DELETE_TOTAL_KEY = 'aiStudioBulkDeleteTotalCount';
 
     let isStopRequested = false;
     let isProcessing = false; // Prevent multiple loops
+    let lastCheckedCheckbox = null; // For Range Selection
+
 
     // Global UI References to handle re-renders
     const uiElements = {
@@ -161,6 +164,73 @@
                     color: white;
                 }
                 .gas-btn.danger:hover { background: #a50e0e; }
+                .gas-btn.secondary {
+                    background: white;
+                    color: #3c4043;
+                    border: 1px solid #dadce0;
+                }
+                .gas-btn.secondary:hover {
+                    background: #f1f3f4;
+                    border-color: #dadce0;
+                }
+
+                /* Progress Bar Styles */
+                .gas-progress-container {
+                    position: fixed;
+                    bottom: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 10000;
+                    background: #333;
+                    color: #fff;
+                    padding: 16px 24px;
+                    border-radius: 12px;
+                    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+                    box-shadow: 0 4px 20px rgba(0,0,0,0.25);
+                    display: flex;
+                    flex-direction: column;
+                    gap: 12px;
+                    min-width: 320px;
+                    opacity: 0;
+                    transform: translate(-50%, 20px);
+                    transition: opacity 0.3s, transform 0.3s;
+                    pointer-events: auto;
+                }
+                .gas-progress-container.visible {
+                    opacity: 1;
+                    transform: translate(-50%, 0);
+                }
+                .gas-progress-header {
+                    display: flex;
+                    justify-content: space-between;
+                    align-items: center;
+                    font-size: 14px;
+                    font-weight: 500;
+                }
+                .gas-progress-bar-bg {
+                    width: 100%;
+                    height: 6px;
+                    background: rgba(255,255,255,0.2);
+                    border-radius: 3px;
+                    overflow: hidden;
+                }
+                .gas-progress-bar-fill {
+                    height: 100%;
+                    background: #4285f4; /* Google Blue */
+                    width: 0%;
+                    transition: width 0.3s ease-out;
+                }
+                .gas-progress-details {
+                    font-size: 12px;
+                    color: rgba(255,255,255,0.7);
+                    text-align: right;
+                }
+
+                /* Highlight for Dry Run */
+                .bulk-delete-highlight {
+                    background-color: rgba(242, 153, 0, 0.2) !important;
+                    border: 2px dashed #F29900 !important;
+                }
             `;
             document.head.appendChild(style);
         },
@@ -212,7 +282,7 @@
                     <div class="gas-modal-title">${title}</div>
                     <div class="gas-modal-content">${message}</div>
                     <div class="gas-modal-actions">
-                        <button class="gas-btn cancel-btn">Cancel</button>
+                        <button class="gas-btn secondary cancel-btn">Cancel</button>
                         <button class="gas-btn ${confirmType} confirm-btn">${confirmText}</button>
                     </div>
                 `;
@@ -237,6 +307,115 @@
                     if (e.target === overlay) close(false);
                 });
             });
+        },
+
+        showProgress: (message, total) => {
+            UI.injectStyles();
+            // Remove existing if any
+            UI.hideProgress();
+
+            const container = document.createElement('div');
+            container.className = 'gas-progress-container';
+            container.id = 'gas-progress-ui';
+
+            container.innerHTML = `
+                <div class="gas-progress-header">
+                    <span id="gas-progress-text">${message}</span>
+                    <span id="gas-progress-percent">0%</span>
+                </div>
+                <div class="gas-progress-bar-bg">
+                    <div class="gas-progress-bar-fill" id="gas-progress-fill"></div>
+                </div>
+                <div class="gas-progress-details" id="gas-progress-count">0 of ${total}</div>
+            `;
+
+            document.body.appendChild(container);
+
+            // Trigger reflow
+            container.offsetHeight;
+            container.classList.add('visible');
+        },
+
+        updateProgress: (current, total, textOverride = null) => {
+            const container = document.getElementById('gas-progress-ui');
+            if (!container) return;
+
+            const percentage = Math.min(100, Math.round((current / total) * 100));
+
+            const fill = document.getElementById('gas-progress-fill');
+            const percentText = document.getElementById('gas-progress-percent');
+            const countText = document.getElementById('gas-progress-count');
+            const mainText = document.getElementById('gas-progress-text');
+
+            if (fill) fill.style.width = `${percentage}%`;
+            if (percentText) percentText.textContent = `${percentage}%`;
+            if (countText) countText.textContent = `${current} of ${total}`;
+            if (textOverride && mainText) mainText.textContent = textOverride;
+        },
+
+        hideProgress: () => {
+            const container = document.getElementById('gas-progress-ui');
+            if (container) {
+                container.classList.remove('visible');
+                setTimeout(() => container.remove(), 300);
+            }
+        },
+
+        showUndoToast: (seconds) => {
+            UI.injectStyles();
+            return new Promise((resolve, reject) => {
+                let container = document.querySelector('.gas-toast-container');
+                if (!container) {
+                    container = document.createElement('div');
+                    container.className = 'gas-toast-container';
+                    document.body.appendChild(container);
+                }
+
+                const toast = document.createElement('div');
+                toast.className = 'gas-toast warning';
+                toast.id = 'gas-undo-toast';
+
+                let remaining = seconds;
+
+                const updateText = () => {
+                    toast.innerHTML = `
+                        <span>⏳</span>
+                        <span style="flex:1">Starting deletion in ${remaining}s...</span>
+                        <button id="gas-undo-cancel" style="background:transparent;border:1px solid white;color:white;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:12px;">CANCEL</button>
+                    `;
+                };
+
+                updateText();
+                container.appendChild(toast);
+
+                // Trigger reflow
+                toast.offsetHeight;
+                toast.classList.add('visible');
+
+                const interval = setInterval(() => {
+                    remaining--;
+                    if (remaining <= 0) {
+                        clearInterval(interval);
+                        toast.classList.remove('visible');
+                        setTimeout(() => toast.remove(), 300);
+                        resolve(true); // Timer finished
+                    } else {
+                        updateText();
+                        // Re-attach listener because innerHTML wiped it
+                        document.getElementById('gas-undo-cancel').addEventListener('click', handleCancel);
+                    }
+                }, 1000);
+
+                const handleCancel = () => {
+                    clearInterval(interval);
+                    toast.classList.remove('visible');
+                    setTimeout(() => toast.remove(), 300);
+                    resolve(false); // Cancelled
+                };
+
+                // Initial listener
+                toast.querySelector('#gas-undo-cancel').addEventListener('click', handleCancel);
+            });
         }
     };
 
@@ -247,6 +426,7 @@
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
+
 
     // --- Count Management ---
     function getCounts() {
@@ -274,6 +454,7 @@
     function clearCounts() {
         sessionStorage.removeItem(aBULK_DELETE_SUCCESS_KEY);
         sessionStorage.removeItem(aBULK_DELETE_FAIL_KEY);
+        sessionStorage.removeItem(aBULK_DELETE_TOTAL_KEY);
     }
 
     async function findAndClickByText(
@@ -327,11 +508,15 @@
 
             const counts = getCounts();
             const totalProcessed = counts.success + counts.fail + 1;
+            const total = parseInt(sessionStorage.getItem(aBULK_DELETE_TOTAL_KEY) || '0');
 
             const progressHTML =
                 `<span style="font-size: 1.2em;">🔥</span> <span>Deleting... (${totalProcessed})</span>`;
 
             if (uiElements.allBtn) uiElements.allBtn.innerHTML = progressHTML;
+
+            // Update Progress Bar
+            UI.updateProgress(totalProcessed, total, `Deleting ${totalProcessed} of ${total}...`);
 
             try {
                 item.click();
@@ -420,6 +605,13 @@
             }
 
             incrementSuccess();
+
+            // Update Progress Bar
+            const counts = getCounts();
+            const total = parseInt(sessionStorage.getItem(aBULK_DELETE_TOTAL_KEY) || '0');
+            const current = counts.success + counts.fail;
+            UI.updateProgress(current, total, `Deleting ${current} of ${total}...`);
+
             await sleep(aDELAY_AFTER_DELETION);
 
             if (onComplete) onComplete();
@@ -427,6 +619,13 @@
         } catch (e) {
             console.error("Error deleting single item:", e);
             incrementFail();
+
+            // Update Progress Bar on failure too
+            const counts = getCounts();
+            const total = parseInt(sessionStorage.getItem(aBULK_DELETE_TOTAL_KEY) || '0');
+            const current = counts.success + counts.fail;
+            UI.updateProgress(current, total, `Error on item ${current}...`);
+
             if (onComplete) onComplete(); // Proceed anyway
             if (!isStopRequested) location.reload();
         }
@@ -467,8 +666,30 @@
                 "danger"
             );
             if (!userConfirmation) return;
+
+            // Undo Timer
+            const proceed = await UI.showUndoToast(5);
+            if (!proceed) {
+                UI.showToast("Deletion Cancelled.", 'info');
+                return;
+            }
+
             sessionStorage.setItem(aBULK_DELETE_ALL_KEY, 'true');
             resetCounts();
+
+            // Initial Total Set
+            sessionStorage.setItem(aBULK_DELETE_TOTAL_KEY, items.length.toString());
+            UI.showProgress("Starting deletion...", items.length);
+        } else {
+            // Auto-start (after reload)
+            // Update total to include new items found
+            const storedTotal = parseInt(sessionStorage.getItem(aBULK_DELETE_TOTAL_KEY) || '0');
+            const newTotal = storedTotal + items.length;
+            sessionStorage.setItem(aBULK_DELETE_TOTAL_KEY, newTotal.toString());
+
+            const counts = getCounts();
+            UI.showProgress("Resuming deletion...", newTotal);
+            UI.updateProgress(counts.success + counts.fail, newTotal);
         }
 
         processBatchDeletion(Array.from(items));
@@ -496,6 +717,14 @@
         );
         if (!userConfirmation) return;
 
+        // Undo Timer
+        const proceed = await UI.showUndoToast(5);
+        if (!proceed) {
+            UI.showToast("Deletion Cancelled.", 'info');
+            return;
+        }
+
+
         const itemHrefs = Array.from(selectedCheckboxes).map(cb => {
             const link = cb.closest('tr').querySelector('a.name-btn');
             return link ? link.getAttribute('href') : null;
@@ -503,6 +732,10 @@
 
         const key = aBULK_DELETE_SELECTED_KEY;
         sessionStorage.setItem(key, JSON.stringify(itemHrefs));
+
+        // Set Total for Selected
+        sessionStorage.setItem(aBULK_DELETE_TOTAL_KEY, itemHrefs.length.toString());
+
         resetCounts();
         location.reload(); // Start the process
     }
@@ -527,6 +760,26 @@
             });
             checkboxCell.appendChild(checkbox);
             row.prepend(checkboxCell);
+
+            // Range Selection Logic
+            checkbox.addEventListener('click', (e) => {
+                if (e.shiftKey && lastCheckedCheckbox && lastCheckedCheckbox !== checkbox) {
+                    const allCheckboxes = Array.from(document.querySelectorAll('.bulk-delete-checkbox'));
+                    const start = allCheckboxes.indexOf(lastCheckedCheckbox);
+                    const end = allCheckboxes.indexOf(checkbox);
+
+                    if (start !== -1 && end !== -1) {
+                        const low = Math.min(start, end);
+                        const high = Math.max(start, end);
+
+                        for (let i = low; i <= high; i++) {
+                            allCheckboxes[i].checked = lastCheckedCheckbox.checked;
+                        }
+                    }
+                }
+                lastCheckedCheckbox = checkbox;
+                updateButtonState();
+            });
         });
 
         const headerRow = document.querySelector('thead tr');
@@ -555,10 +808,50 @@
             allCheckboxes.forEach(checkbox => {
                 checkbox.checked = isChecked;
             });
+            updateButtonState();
         });
 
         th.appendChild(masterCheckbox);
         headerRow.prepend(th);
+    }
+
+    function simulateDelete() {
+        const selector = '.bulk-delete-checkbox:checked';
+        const selectedCheckboxes = document.querySelectorAll(selector);
+
+        let targets = [];
+        if (selectedCheckboxes.length > 0) {
+            targets = Array.from(selectedCheckboxes).map(cb => cb.closest('tr'));
+        } else {
+            // If nothing selected, maybe simulate ALL?
+            // For now, let's just simulate selected if any, or warn.
+            // Actually, user might want to simulate "Delete All".
+            // But "Delete All" deletes everything, so we can just highlight everything.
+            // Let's stick to simulating selection if selection exists, otherwise warn.
+            // Or if user clicks Simulate with nothing selected, maybe we simulate ALL visible?
+            // Let's simulate ALL visible if nothing selected.
+            targets = Array.from(document.querySelectorAll('tbody tr.mat-mdc-row'));
+        }
+
+        if (targets.length === 0) {
+            UI.showToast("No chats found to simulate.", 'warning');
+            return;
+        }
+
+        // Highlight
+        targets.forEach(el => {
+            el.classList.add('bulk-delete-highlight');
+        });
+
+        const mode = selectedCheckboxes.length > 0 ? "Selected" : "All Visible";
+        UI.showToast(`DRY RUN (${mode}): Would delete ${targets.length} chat(s).`, 'info', 4000);
+
+        // Remove highlight after 4 seconds
+        setTimeout(() => {
+            targets.forEach(el => {
+                el.classList.remove('bulk-delete-highlight');
+            });
+        }, 4000);
     }
 
 
@@ -594,6 +887,23 @@
             textDecoration: 'none',
             border: 'none' // Ensure no border overrides the class
         };
+
+        // --- Simulate Button ---
+        const simulateButton = document.createElement('button');
+        simulateButton.id = 'bulk-delete-simulate-button';
+        simulateButton.setAttribute('ms-button', '');
+        simulateButton.innerHTML =
+            `<span style="font-size: 1.2em;">🧪</span>`;
+        simulateButton.title = "Simulate Deletion (Dry Run)";
+        simulateButton.className = btnClass;
+        Object.assign(simulateButton.style, {
+            ...commonStyle,
+            backgroundColor: '#f4b400', // Yellow/Orange
+            color: '#202124',
+            minWidth: '40px',
+            padding: '0 12px'
+        });
+        simulateButton.onclick = simulateDelete;
 
         // --- Delete All Button ---
         const bulkDeleteAllButton = document.createElement('button');
@@ -645,6 +955,7 @@
         addHover(bulkDeleteAllButton);
         addHover(bulkDeleteSelectedButton);
         addHover(stopButton);
+        addHover(simulateButton);
 
         // --- Event Listeners ---
         stopButton.addEventListener('click', () => {
@@ -669,6 +980,7 @@
         );
 
         // Append to DOM
+        wrapper.appendChild(simulateButton);
         wrapper.appendChild(bulkDeleteSelectedButton);
         wrapper.appendChild(bulkDeleteAllButton);
         wrapper.appendChild(stopButton);
@@ -684,6 +996,8 @@
             bulkDeleteSelectedButton.disabled = true;
             stopButton.style.display = 'inline-flex';
             // Note: innerHTML for progress is updated by the running loop
+        } else {
+            updateButtonState(); // Set initial state
         }
 
         setTimeout(() => handleAutoDeletion(), 2000);
@@ -708,6 +1022,13 @@
                 if (uiElements.allBtn) uiElements.allBtn.disabled = true;
                 if (uiElements.selBtn) uiElements.selBtn.disabled = true;
                 if (uiElements.stopBtn) uiElements.stopBtn.style.display = 'inline-flex';
+
+                // Show Progress Bar
+                const total = parseInt(sessionStorage.getItem(aBULK_DELETE_TOTAL_KEY) || itemHrefs.length.toString());
+                const counts = getCounts();
+                const current = counts.success + counts.fail;
+                UI.showProgress("Deleting selected...", total);
+                UI.updateProgress(current, total);
 
                 const nextHref = itemHrefs[0];
                 const linkSelector = `a.name-btn[href="${nextHref}"]`;
@@ -741,15 +1062,30 @@
                 sessionStorage.removeItem(key);
                 const counts = getCounts();
                 clearCounts();
+                UI.hideProgress();
                 UI.showToast(`Selected items have been deleted. Deleted: ${counts.success}, Failed: ${counts.fail}`, 'success', 5000);
 
                 if (uiElements.allBtn) uiElements.allBtn.disabled = false;
                 if (uiElements.selBtn) {
                     uiElements.selBtn.disabled = false;
-                    uiElements.selBtn.innerHTML =
-                        `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
+                    updateButtonState(); // Reset text
                 }
                 if (uiElements.stopBtn) uiElements.stopBtn.style.display = 'none';
+            }
+        }
+    }
+
+    function updateButtonState() {
+        const selectedCount = document.querySelectorAll('.bulk-delete-checkbox:checked').length;
+        const btn = uiElements.selBtn;
+
+        if (btn) {
+            if (selectedCount > 0) {
+                btn.disabled = false;
+                btn.innerHTML = `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected (${selectedCount})</span>`;
+            } else {
+                btn.disabled = true; // Optional: disable if nothing selected, like Gemini
+                btn.innerHTML = `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
             }
         }
     }
