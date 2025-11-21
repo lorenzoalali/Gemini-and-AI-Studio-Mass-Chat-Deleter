@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21
+// @version      2025-11-21-v2
 // @description  Bulk delete (mass-remove) chats from Gemini in batch.
 // @author       Lorenzo Alali
 // @match        https://gemini.google.com/*
@@ -211,9 +211,9 @@
         updateButtonState();
 
         if (successCount > 0 || failureCount > 0) {
-             alert(`Deletion Complete!\n\n✅ Deleted: ${successCount}\n❌ Errors: ${failureCount}`);
+            alert(`Deletion Complete!\n\n✅ Deleted: ${successCount}\n❌ Errors: ${failureCount}`);
         } else {
-             alert("No chats found to delete.");
+            alert("No chats found to delete.");
         }
     }
 
@@ -221,7 +221,7 @@
         if (deletionInProgress) {
             deletionInProgress = false;
             const stopBtn = document.getElementById('stop-delete-btn');
-            if(stopBtn) {
+            if (stopBtn) {
                 stopBtn.innerHTML = '<span class="bulk-delete-emoji">🛑</span> Stopping...';
                 stopBtn.disabled = true;
             }
