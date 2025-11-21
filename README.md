@@ -10,6 +10,7 @@ These scripts provide a "Delete All" and "Delete Selected" experience, functioni
 
 ### Google Gemini Bulk Deleter
 *   **Mass Deletion:** One-click solution to clear history by automating the removal of all chats in the sidebar.
+*   **Select & Delete:** Checkboxes allow for precise removal of specific conversations.
 *   **Smart DOM Interaction:** Deletes items sequentially without requiring a full page reload for every action.
 *   **Safety Stop:** A visible "Stop" button allows you to halt the automated deletion process instantly.
 *   **Status Indicators:** Visual emojis indicate when the bulk removal is in progress.
@@ -38,9 +39,9 @@ You can use these *Greasy Fork* links or copy/paste the source code from *GitHub
 
 ### For Google Gemini
 1.  Navigate to the [Gemini app](https://gemini.google.com/app).
-2.  Look for the *🔥 Delete All* button in the top-right header area.
-3.  Click to start the automated deletion. Confirm the browser dialog.
-4.  The script will iterate through your sidebar to wipe all chats.
+2.  **To Wipe Everything:** Click the *🔥 Delete All* button in the top-right header area.
+3.  **To Delete Specifics:** Check the boxes next to the chats you want to remove, then click *✅ Delete Selected*.
+4.  The script will iterate through your sidebar to wipe the chosen chats.
 5.  Click *🛑 Stop* at any time to pause.
 
 ![GIF: Gemini GIF](images/README_Gemini.gif)
