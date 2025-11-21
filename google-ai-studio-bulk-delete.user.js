@@ -9,6 +9,8 @@
 // @license      MIT
 // @homepageURL  https://github.com/lorenzoalali/Gemini-and-AI-Studio-Mass-Chat-Deleter
 // @run-at       document-idle
+// @downloadURL https://update.greasyfork.org/scripts/555870/Google%20AI%20Studio%20Bulk%20Delete.user.js
+// @updateURL https://update.greasyfork.org/scripts/555870/Google%20AI%20Studio%20Bulk%20Delete.meta.js
 // ==/UserScript==
 
 /*

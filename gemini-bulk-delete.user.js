@@ -9,6 +9,8 @@
 // @grant        GM_log
 // @license      MIT
 // @homepageURL  https://github.com/lorenzoalali/Gemini-and-AI-Studio-Mass-Chat-Deleter
+// @downloadURL https://update.greasyfork.org/scripts/556503/Gemini%20Bulk%20Chat%20Deleter.user.js
+// @updateURL https://update.greasyfork.org/scripts/556503/Gemini%20Bulk%20Chat%20Deleter.meta.js
 // ==/UserScript==
 
 /*
