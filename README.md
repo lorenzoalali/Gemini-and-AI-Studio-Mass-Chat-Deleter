@@ -54,3 +54,8 @@ You can use these *Greasy Fork* links or copy/paste the source code from *GitHub
 ## ⚠️ Disclaimer
 **Usage At Your Own Risk:**
 These scripts are third-party tools and are not affiliated with Google. Using a chat history cleaner is permanent; deleted data cannot be recovered. These scripts allow you to mass-delete content, but the author assumes no responsibility for data loss or account issues.
+
+## 🔮 Future Compatibility
+This script's operation depends on the current Document Object Model (DOM) of the Google AI Studio platform.
+Modifications to the website by Google are likely to render this script non-functional in the future.
+While the author does not plan on providing proactive updates or support, contributions in the form of GitHub pull requestsare welcome.
