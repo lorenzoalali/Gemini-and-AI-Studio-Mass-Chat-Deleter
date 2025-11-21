@@ -1,12 +1,13 @@
 // ==UserScript==
 // @name         Google AI Studio Bulk Delete
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-14
-// @description  Allows the deletion of several chats at once from the Google AI Studio library webpage.
+// @version      2025-11-21
+// @description  Bulk delete (mass-remove) chats from Google AI Studio in batch.
 // @author       Lorenzo Alali
-// @match        https://aistudio.google.com/library*
+// @match        https://aistudio.google.com/*
 // @grant        none
 // @license      MIT
+// @homepageURL  https://github.com/lorenzoalali/Gemini-and-AI-Studio-Mass-Chat-Deleter
 // @run-at       document-idle
 // ==/UserScript==
 
@@ -14,29 +15,9 @@
  * =======================================================================
  * --- DISCLAIMER & IMPORTANT INFORMATION ---
  *
- * This tool can be found
+ * This tool (and its Gemini equivalent) can be found
  * on GitHub https://github.com/lorenzoalali/Google-AI-Studio-Bulk-Delete-UserScript
  * and on Greasy Fork https://greasyfork.org/en/scripts/555870-google-ai-studio-bulk-delete
- *
- * --- HOW THIS SCRIPT WORKS ---
- * This script enhances the Google AI Studio library by adding bulk deletion capabilities.
- *
- * 1.  Bulk Delete All: This feature automates clearing your entire library. After confirmation, it deletes all
- *     visible items in a batch, reloads the page, and continues until the library is empty.
- *
- * 2.  Bulk Delete Selected: Checkboxes are added next to each item, allowing you to select specific chats for
- *     deletion. This process deletes items one-by-one, reloading the page after each deletion, until all
- *     selected items are removed.
- *
- * 3.  Full Control: You can press the "Stop" button at any time to safely halt any ongoing bulk deletion process.
- *
- * 4.  Configurable Delays: The delays between actions can be configured in the "Configuration" section of the script.
- *
- * --- TESTED CONFIGURATION ---
- * This script was tested under the following configuration:
- *   - Operating System: macOS Tahoe 26.1
- *   - Browser: Firefox 145.0
- *   - UserScript Manager: Tampermonkey 5.4.0
  *
  * --- USAGE AT YOUR OWN RISK ---
  * The author provides no guarantees regarding the performance, safety, or functionality of this script. You assume
@@ -48,30 +29,7 @@
  * Modifications to the website by Google are likely to render this script non-functional in the future. While the
  * author does not plan on providing proactive updates or support, contributions in the form of GitHub pull requests
  * are welcome.
- *
  * =======================================================================
- */
-
-/*
- * --- LICENSE ---
- *
- * MIT License
- *
- * Copyright (c) 2025 Lorenzo Alali
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated
- * documentation files (the "Software"), to deal in the Software without restriction, including without
- * limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the
- * Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions
- * of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO
- * THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF
- * CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
- * DEALINGS IN THE SOFTWARE.
  */
 
 (function() {
@@ -128,7 +86,7 @@
     ) {
         bulkDeleteAllButton.disabled = true;
         bulkDeleteSelectedButton.disabled = true;
-        stopButton.style.display = 'inline-block';
+        stopButton.style.display = 'inline-flex';
 
         for (let i = 0; i < items.length; i++) {
             if (isStopRequested) {
@@ -141,7 +99,7 @@
             if (!document.body.contains(item)) continue;
 
             const progressHTML =
-                `<span style="font-size: 200%; vertical-align: middle;">🔥</span> Deleting ${i + 1}/${items.length}...`;
+                `<span style="font-size: 1.2em;">🔥</span> <span>Deleting ${i + 1}/${items.length}...</span>`;
             bulkDeleteAllButton.innerHTML = progressHTML;
 
             item.click();
@@ -175,7 +133,7 @@
             bulkDeleteAllButton.disabled = false;
             bulkDeleteSelectedButton.disabled = false;
             bulkDeleteAllButton.innerHTML =
-                '<span style="font-size: 200%; vertical-align: middle;">🔥</span> Delete All';
+                `<span style="font-size: 1.2em;">🔥</span> <span>Delete All</span>`;
             stopButton.style.display = 'none';
         }
     }
@@ -278,6 +236,9 @@
     }
 
     function addCheckboxesToRows() {
+        // Only run if we are on the library page
+        if (!location.href.includes('/library')) return;
+
         const rows = document.querySelectorAll('tbody tr.mat-mdc-row');
         rows.forEach(row => {
             if (row.querySelector('.bulk-delete-checkbox-cell')) return;
@@ -330,73 +291,87 @@
 
 
     function addButtons() {
+        // Only run if we are on the library page
+        if (!location.href.includes('/library')) return;
         if (document.getElementById('bulk-delete-all-button')) return;
 
         const wrapper = document.querySelector('.lib-header .actions-wrapper');
         if (!wrapper) return;
 
+        // Use the EXACT classes from the native "Open in Drive" button
         const btnClass = 'responsive-button-viewport-medium viewport-small-hidden ms-button-primary';
 
+        // Minimal inline styles to position the buttons and override specific colors.
+        // We rely on the classes above for shape, padding, font, and height.
+        const commonStyle = {
+            marginLeft: '10px',
+            cursor: 'pointer',
+            color: 'white',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '8px',
+            textDecoration: 'none',
+            border: 'none' // Ensure no border overrides the class
+        };
+
+        // --- Delete All Button ---
         const bulkDeleteAllButton = document.createElement('button');
         bulkDeleteAllButton.id = 'bulk-delete-all-button';
+        // Add 'ms-button' attribute as seen in the native anchor tag
+        bulkDeleteAllButton.setAttribute('ms-button', '');
         bulkDeleteAllButton.innerHTML =
-            '<span style="font-size: 200%; vertical-align: middle;">🔥</span> Delete All';
+            `<span style="font-size: 1.2em;">🔥</span> <span>Delete All</span>`;
         bulkDeleteAllButton.className = btnClass;
         Object.assign(bulkDeleteAllButton.style, {
-            marginLeft: '10px',
-            backgroundColor: '#E57373', // Light Red
-            color: 'white',
-            border: 'none',
-            borderRadius: '50px',
-            padding: '8px 20px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
-            transition: 'background-color 0.2s'
+            ...commonStyle,
+            backgroundColor: '#d93025', // Google Red override for 'delete' action
         });
 
+        // --- Delete Selected Button ---
         const bulkDeleteSelectedButton = document.createElement('button');
         bulkDeleteSelectedButton.id = 'bulk-delete-selected-button';
+        bulkDeleteSelectedButton.setAttribute('ms-button', '');
         bulkDeleteSelectedButton.innerHTML =
-            '<span style="font-size: 200%; vertical-align: middle;">🗑️</span> Delete Selected';
+            `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
         bulkDeleteSelectedButton.className = btnClass;
         Object.assign(bulkDeleteSelectedButton.style, {
-            marginLeft: '10px',
-            backgroundColor: '#FFB74D', // Light Orange
-            color: 'white',
-            border: 'none',
-            borderRadius: '50px',
-            padding: '8px 20px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
-            transition: 'background-color 0.2s'
+            ...commonStyle,
+            backgroundColor: '#e37400', // Google Orange/Warning override
         });
 
+        // --- Stop Button ---
         const stopButton = document.createElement('button');
         stopButton.id = 'stop-bulk-delete-button';
+        stopButton.setAttribute('ms-button', '');
         stopButton.innerHTML =
-            '<span style="font-size: 200%; vertical-align: middle;">🛑</span> Stop';
+            `<span style="font-size: 1.2em;">🛑</span> <span>Stop</span>`;
         stopButton.className = btnClass;
         Object.assign(stopButton.style, {
-            marginLeft: '10px',
-            backgroundColor: '#4285F4',
-            color: 'white',
-            border: 'none',
-            borderRadius: '50px',
-            padding: '8px 20px',
-            fontWeight: 'bold',
-            cursor: 'pointer',
-            boxShadow: '0 2px 4px rgba(0,0,0,0.15)',
-            display: 'none',
-            transition: 'background-color 0.2s'
+            ...commonStyle,
+            // No background color override needed here if we want the native Blue (ms-button-primary default)
+            // But explicit is safer if the class logic changes:
+            backgroundColor: '#1a73e8', // Google Blue
+            display: 'none' // Hidden by default
         });
 
+        // --- Hover Effects ---
+        // Native buttons typically have a state overlay.
+        // We simulate this simply by dimming slightly on hover.
+        const addHover = (btn) => {
+            btn.addEventListener('mouseenter', () => btn.style.filter = 'brightness(0.95)');
+            btn.addEventListener('mouseleave', () => btn.style.filter = 'brightness(1)');
+        };
+        addHover(bulkDeleteAllButton);
+        addHover(bulkDeleteSelectedButton);
+        addHover(stopButton);
+
+        // --- Event Listeners ---
         stopButton.addEventListener('click', () => {
             isStopRequested = true;
             sessionStorage.removeItem(aBULK_DELETE_ALL_KEY);
             sessionStorage.removeItem(aBULK_DELETE_SELECTED_KEY);
-            stopButton.innerHTML = '<span style="font-size: 200%; vertical-align: middle;">🛑</span> Stopping...';
+            stopButton.innerHTML = `<span style="font-size: 1.2em;">🛑</span> <span>Stopping...</span>`;
             stopButton.disabled = true;
             alert(
                 "Bulk delete will stop. The page will not reload " +
@@ -416,6 +391,7 @@
             startBulkDeleteSelected()
         );
 
+        // Append to DOM
         wrapper.appendChild(bulkDeleteSelectedButton);
         wrapper.appendChild(bulkDeleteAllButton);
         wrapper.appendChild(stopButton);
@@ -447,7 +423,7 @@
         } else if (sessionStorage.getItem(aBULK_DELETE_SELECTED_KEY)) {
             bulkDeleteAllButton.disabled = true;
             bulkDeleteSelectedButton.disabled = true;
-            stopButton.style.display = 'inline-block';
+            stopButton.style.display = 'inline-flex'; // Flex for alignment
 
             const key = aBULK_DELETE_SELECTED_KEY;
             let itemHrefs = JSON.parse(sessionStorage.getItem(key));
@@ -459,8 +435,8 @@
 
                 if (nextLink) {
                     const progressHTML =
-                        `<span style="font-size: 200%; vertical-align: middle;">🗑️</span> ` +
-                        `Deleting ${itemHrefs.length} selected...`;
+                        `<span style="font-size: 1.2em;">🗑️</span> ` +
+                        `<span>Deleting ${itemHrefs.length} selected...</span>`;
                     bulkDeleteSelectedButton.innerHTML = progressHTML;
                     const itemMenu = nextLink.closest('tr')
                         .querySelector('ms-prompt-options-menu button');
@@ -487,22 +463,36 @@
                 bulkDeleteAllButton.disabled = false;
                 bulkDeleteSelectedButton.disabled = false;
                 bulkDeleteSelectedButton.innerHTML =
-                    '<span style="font-size: 200%; vertical-align: middle;">🗑️</span> Delete Selected';
+                    `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
                 stopButton.style.display = 'none';
             }
         }
     }
 
-    const observer = new MutationObserver((mutations, obs) => {
-        const wrapper = document.querySelector('.lib-header .actions-wrapper');
-        const tableBody = document.querySelector('tbody.mdc-data-table__content');
-        if (wrapper) addButtons();
-        if (tableBody) addCheckboxesToRows();
+    function manageUI() {
+        // If we are on the library page, attempt to inject UI
+        if (location.href.includes('/library')) {
+            addButtons();
+            addCheckboxesToRows();
+        }
+    }
+
+    // --- Observer Setup ---
+    const observer = new MutationObserver((mutations) => {
+        manageUI();
     });
 
     observer.observe(document.body, {
         childList: true,
         subtree: true
     });
+
+    // --- Fallback Interval ---
+    setInterval(() => {
+        manageUI();
+    }, 1000);
+
+    // Initial Run
+    manageUI();
 
 })();
