@@ -30,8 +30,8 @@ To use these tools, you need a UserScript manager such as **Tampermonkey**.
 4. Refresh the Google Gemini or AI Studio page to see the new controls.
 
 You can use these *Greasy Fork* links or copy/paste the source code from *GitHub* into a new User Script from your *Tampermonkey*.
-*   **Google AI Studio Bulk Delete:** [Install Link](https://greasyfork.org/en/scripts/555870-google-ai-studio-bulk-delete)
-*   **Gemini Bulk Chat Deleter:** [Install Link](https://greasyfork.org/en/scripts/556503-gemini-bulk-chat-deleter)
+*   **Google AI Studio Bulk Delete:** [Install Link](https://greasyfork.org/en/scripts/555870-google-ai-studio-bulk-delete) - [GitHub source](google-ai-studio-bulk-delete.user.js)
+*   **Gemini Bulk Chat Deleter:** [Install Link](https://greasyfork.org/en/scripts/556503-gemini-bulk-chat-deleter) - [GitHub source](gemini-bulk-delete.user.js)
 
 ## 🛠️ Usage
 
