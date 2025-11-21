@@ -32,13 +32,24 @@
  * =======================================================================
  */
 
-(function() {
+(function () {
     'use strict';
 
     // --- State Management ---
     const aBULK_DELETE_ALL_KEY = 'isAiStudioBulkDeletingAll';
     const aBULK_DELETE_SELECTED_KEY = 'isAiStudioBulkDeletingSelected';
+    const aBULK_DELETE_SUCCESS_KEY = 'aiStudioBulkDeleteSuccessCount';
+    const aBULK_DELETE_FAIL_KEY = 'aiStudioBulkDeleteFailCount';
+
     let isStopRequested = false;
+    let isProcessing = false; // Prevent multiple loops
+
+    // Global UI References to handle re-renders
+    const uiElements = {
+        allBtn: null,
+        selBtn: null,
+        stopBtn: null
+    };
 
     // --- Configuration ---
     const aDELAY_BETWEEN_ACTIONS = 500;
@@ -46,6 +57,34 @@
 
     function sleep(ms) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // --- Count Management ---
+    function getCounts() {
+        return {
+            success: parseInt(sessionStorage.getItem(aBULK_DELETE_SUCCESS_KEY) || '0', 10),
+            fail: parseInt(sessionStorage.getItem(aBULK_DELETE_FAIL_KEY) || '0', 10)
+        };
+    }
+
+    function incrementSuccess() {
+        const current = getCounts().success;
+        sessionStorage.setItem(aBULK_DELETE_SUCCESS_KEY, (current + 1).toString());
+    }
+
+    function incrementFail() {
+        const current = getCounts().fail;
+        sessionStorage.setItem(aBULK_DELETE_FAIL_KEY, (current + 1).toString());
+    }
+
+    function resetCounts() {
+        sessionStorage.setItem(aBULK_DELETE_SUCCESS_KEY, '0');
+        sessionStorage.setItem(aBULK_DELETE_FAIL_KEY, '0');
+    }
+
+    function clearCounts() {
+        sessionStorage.removeItem(aBULK_DELETE_SUCCESS_KEY);
+        sessionStorage.removeItem(aBULK_DELETE_FAIL_KEY);
     }
 
     async function findAndClickByText(
@@ -78,31 +117,94 @@
     /**
      * Processes a batch of deletions (all visible items) and then reloads.
      */
-    async function processBatchDeletion(
-        items,
-        bulkDeleteAllButton,
-        bulkDeleteSelectedButton,
-        stopButton
-    ) {
-        bulkDeleteAllButton.disabled = true;
-        bulkDeleteSelectedButton.disabled = true;
-        stopButton.style.display = 'inline-flex';
+    async function processBatchDeletion(items) {
+        isProcessing = true;
+
+        if (uiElements.allBtn) uiElements.allBtn.disabled = true;
+        if (uiElements.selBtn) uiElements.selBtn.disabled = true;
+        if (uiElements.stopBtn) uiElements.stopBtn.style.display = 'inline-flex';
 
         for (let i = 0; i < items.length; i++) {
             if (isStopRequested) {
                 sessionStorage.removeItem(aBULK_DELETE_ALL_KEY);
+                clearCounts();
                 alert("Bulk delete process stopped by user.");
+                isProcessing = false;
                 break;
             }
 
             const item = items[i];
             if (!document.body.contains(item)) continue;
 
-            const progressHTML =
-                `<span style="font-size: 1.2em;">🔥</span> <span>Deleting ${i + 1}/${items.length}...</span>`;
-            bulkDeleteAllButton.innerHTML = progressHTML;
+            const counts = getCounts();
+            const totalProcessed = counts.success + counts.fail + 1;
 
-            item.click();
+            const progressHTML =
+                `<span style="font-size: 1.2em;">🔥</span> <span>Deleting... (${totalProcessed})</span>`;
+
+            if (uiElements.allBtn) uiElements.allBtn.innerHTML = progressHTML;
+
+            try {
+                item.click();
+                await sleep(aDELAY_BETWEEN_ACTIONS);
+
+                const delMenu = await findAndClickByText(
+                    'button[role="menuitem"]',
+                    ['Delete']
+                );
+                if (!delMenu) {
+                    document.querySelector('.cdk-overlay-backdrop')?.click();
+                    incrementFail();
+                    continue;
+                }
+                await sleep(aDELAY_BETWEEN_ACTIONS);
+
+                const delConfirm = await findAndClickByText(
+                    '.mat-mdc-dialog-actions button',
+                    ['Delete']
+                );
+                if (!delConfirm) {
+                    document.querySelector('.cdk-overlay-backdrop')?.click();
+                    incrementFail();
+                    continue;
+                }
+
+                incrementSuccess();
+                await sleep(aDELAY_AFTER_DELETION);
+            } catch (e) {
+                console.error("Error deleting item:", e);
+                incrementFail();
+            }
+        }
+
+        if (!isStopRequested) {
+            location.reload();
+        } else {
+            if (uiElements.allBtn) {
+                uiElements.allBtn.disabled = false;
+                uiElements.allBtn.innerHTML =
+                    `<span style="font-size: 1.2em;">🔥</span> <span>Delete All</span>`;
+            }
+            if (uiElements.selBtn) uiElements.selBtn.disabled = false;
+            if (uiElements.stopBtn) uiElements.stopBtn.style.display = 'none';
+            isProcessing = false;
+        }
+    }
+
+
+    /**
+     * Deletes a single item and triggers a page reload.
+     */
+    async function deleteSingleItemAndReload(itemMenuButton, onComplete) {
+        isProcessing = true;
+        if (!document.body.contains(itemMenuButton)) {
+            incrementFail();
+            isProcessing = false;
+            return;
+        }
+
+        try {
+            itemMenuButton.click();
             await sleep(aDELAY_BETWEEN_ACTIONS);
 
             const delMenu = await findAndClickByText(
@@ -111,7 +213,9 @@
             );
             if (!delMenu) {
                 document.querySelector('.cdk-overlay-backdrop')?.click();
-                continue;
+                incrementFail();
+                isProcessing = false;
+                return;
             }
             await sleep(aDELAY_BETWEEN_ACTIONS);
 
@@ -121,72 +225,43 @@
             );
             if (!delConfirm) {
                 document.querySelector('.cdk-overlay-backdrop')?.click();
-                continue;
+                incrementFail();
+                isProcessing = false;
+                return;
             }
 
+            incrementSuccess();
             await sleep(aDELAY_AFTER_DELETION);
+
+            if (onComplete) onComplete();
+            if (!isStopRequested) location.reload();
+        } catch (e) {
+            console.error("Error deleting single item:", e);
+            incrementFail();
+            if (onComplete) onComplete(); // Proceed anyway
+            if (!isStopRequested) location.reload();
         }
-
-        if (!isStopRequested) {
-            location.reload();
-        } else {
-            bulkDeleteAllButton.disabled = false;
-            bulkDeleteSelectedButton.disabled = false;
-            bulkDeleteAllButton.innerHTML =
-                `<span style="font-size: 1.2em;">🔥</span> <span>Delete All</span>`;
-            stopButton.style.display = 'none';
-        }
-    }
-
-
-    /**
-     * Deletes a single item and triggers a page reload.
-     */
-    async function deleteSingleItemAndReload(itemMenuButton, onComplete) {
-        if (!document.body.contains(itemMenuButton)) return;
-
-        itemMenuButton.click();
-        await sleep(aDELAY_BETWEEN_ACTIONS);
-
-        const delMenu = await findAndClickByText(
-            'button[role="menuitem"]',
-            ['Delete']
-        );
-        if (!delMenu) {
-            document.querySelector('.cdk-overlay-backdrop')?.click();
-            return;
-        }
-        await sleep(aDELAY_BETWEEN_ACTIONS);
-
-        const delConfirm = await findAndClickByText(
-            '.mat-mdc-dialog-actions button',
-            ['Delete']
-        );
-        if (!delConfirm) {
-            document.querySelector('.cdk-overlay-backdrop')?.click();
-            return;
-        }
-
-        await sleep(aDELAY_AFTER_DELETION);
-
-        if (onComplete) onComplete();
-        if (!isStopRequested) location.reload();
+        isProcessing = false;
     }
 
     /**
      * Starts the 'Bulk Delete All' process.
      */
-    function startBulkDeleteAll(
-        bulkDeleteAllButton,
-        bulkDeleteSelectedButton,
-        stopButton,
-        isAutoStart = false
-    ) {
+    function startBulkDeleteAll(isAutoStart = false) {
         const query = 'ms-prompt-options-menu button[aria-label="More options"]';
         const items = document.querySelectorAll(query);
+
         if (items.length === 0) {
             sessionStorage.removeItem(aBULK_DELETE_ALL_KEY);
-            alert("Bulk delete complete. Your library is now empty.");
+            const counts = getCounts();
+            clearCounts();
+
+            if (counts.success > 0 || counts.fail > 0) {
+                alert(`Bulk delete complete.\n\n✅ Deleted: ${counts.success}\n❌ Failed: ${counts.fail}`);
+            } else {
+                alert("Bulk delete complete. Your library is now empty.");
+            }
+            isProcessing = false;
             return;
         }
 
@@ -198,14 +273,10 @@
             const userConfirmation = confirm(confirmMsg);
             if (!userConfirmation) return;
             sessionStorage.setItem(aBULK_DELETE_ALL_KEY, 'true');
+            resetCounts();
         }
 
-        processBatchDeletion(
-            Array.from(items),
-            bulkDeleteAllButton,
-            bulkDeleteSelectedButton,
-            stopButton
-        );
+        processBatchDeletion(Array.from(items));
     }
 
     /**
@@ -232,6 +303,7 @@
 
         const key = aBULK_DELETE_SELECTED_KEY;
         sessionStorage.setItem(key, JSON.stringify(itemHrefs));
+        resetCounts();
         location.reload(); // Start the process
     }
 
@@ -293,7 +365,15 @@
     function addButtons() {
         // Only run if we are on the library page
         if (!location.href.includes('/library')) return;
-        if (document.getElementById('bulk-delete-all-button')) return;
+
+        // If buttons exist, update references and return
+        const existingAll = document.getElementById('bulk-delete-all-button');
+        if (existingAll) {
+            uiElements.allBtn = existingAll;
+            uiElements.selBtn = document.getElementById('bulk-delete-selected-button');
+            uiElements.stopBtn = document.getElementById('stop-bulk-delete-button');
+            return;
+        }
 
         const wrapper = document.querySelector('.lib-header .actions-wrapper');
         if (!wrapper) return;
@@ -371,6 +451,7 @@
             isStopRequested = true;
             sessionStorage.removeItem(aBULK_DELETE_ALL_KEY);
             sessionStorage.removeItem(aBULK_DELETE_SELECTED_KEY);
+            clearCounts();
             stopButton.innerHTML = `<span style="font-size: 1.2em;">🛑</span> <span>Stopping...</span>`;
             stopButton.disabled = true;
             alert(
@@ -380,12 +461,7 @@
         });
 
         bulkDeleteAllButton.addEventListener('click', () =>
-            startBulkDeleteAll(
-                bulkDeleteAllButton,
-                bulkDeleteSelectedButton,
-                stopButton,
-                false
-            )
+            startBulkDeleteAll(false)
         );
         bulkDeleteSelectedButton.addEventListener('click', () =>
             startBulkDeleteSelected()
@@ -396,39 +472,42 @@
         wrapper.appendChild(bulkDeleteAllButton);
         wrapper.appendChild(stopButton);
 
-        setTimeout(() => handleAutoDeletion(
-            bulkDeleteAllButton,
-            bulkDeleteSelectedButton,
-            stopButton
-        ), 2000);
+        // Update Global Refs
+        uiElements.allBtn = bulkDeleteAllButton;
+        uiElements.selBtn = bulkDeleteSelectedButton;
+        uiElements.stopBtn = stopButton;
+
+        // If we are processing (e.g. after a re-render), restore UI state
+        if (isProcessing) {
+            bulkDeleteAllButton.disabled = true;
+            bulkDeleteSelectedButton.disabled = true;
+            stopButton.style.display = 'inline-flex';
+            // Note: innerHTML for progress is updated by the running loop
+        }
+
+        setTimeout(() => handleAutoDeletion(), 2000);
     }
 
     /**
      * Checks session storage on page load and continues any pending
      * deletion process.
      */
-    function handleAutoDeletion(
-        bulkDeleteAllButton,
-        bulkDeleteSelectedButton,
-        stopButton
-    ) {
+    function handleAutoDeletion() {
+        if (isProcessing) return; // Already running
+
         if (sessionStorage.getItem(aBULK_DELETE_ALL_KEY) === 'true') {
-            startBulkDeleteAll(
-                bulkDeleteAllButton,
-                bulkDeleteSelectedButton,
-                stopButton,
-                true
-            );
+            startBulkDeleteAll(true);
 
         } else if (sessionStorage.getItem(aBULK_DELETE_SELECTED_KEY)) {
-            bulkDeleteAllButton.disabled = true;
-            bulkDeleteSelectedButton.disabled = true;
-            stopButton.style.display = 'inline-flex'; // Flex for alignment
-
             const key = aBULK_DELETE_SELECTED_KEY;
             let itemHrefs = JSON.parse(sessionStorage.getItem(key));
 
             if (itemHrefs.length > 0) {
+                // Update UI for selected deletion
+                if (uiElements.allBtn) uiElements.allBtn.disabled = true;
+                if (uiElements.selBtn) uiElements.selBtn.disabled = true;
+                if (uiElements.stopBtn) uiElements.stopBtn.style.display = 'inline-flex';
+
                 const nextHref = itemHrefs[0];
                 const linkSelector = `a.name-btn[href="${nextHref}"]`;
                 const nextLink = document.querySelector(linkSelector);
@@ -437,17 +516,15 @@
                     const progressHTML =
                         `<span style="font-size: 1.2em;">🗑️</span> ` +
                         `<span>Deleting ${itemHrefs.length} selected...</span>`;
-                    bulkDeleteSelectedButton.innerHTML = progressHTML;
+                    if (uiElements.selBtn) uiElements.selBtn.innerHTML = progressHTML;
+
                     const itemMenu = nextLink.closest('tr')
                         .querySelector('ms-prompt-options-menu button');
 
                     deleteSingleItemAndReload(itemMenu, () => {
                         itemHrefs.shift(); // Remove processed item
-                        if (itemHrefs.length > 0) {
-                            sessionStorage.setItem(key, JSON.stringify(itemHrefs));
-                        } else {
-                            sessionStorage.removeItem(key);
-                        }
+                        // Always save the array, even if empty, so we detect "finished" state on next load
+                        sessionStorage.setItem(key, JSON.stringify(itemHrefs));
                     });
                 } else {
                     console.warn(
@@ -455,16 +532,23 @@
                     );
                     itemHrefs.shift();
                     sessionStorage.setItem(key, JSON.stringify(itemHrefs));
+                    incrementFail();
                     location.reload();
                 }
             } else {
+                // List is empty, meaning we finished
                 sessionStorage.removeItem(key);
-                alert("Selected items have been deleted.");
-                bulkDeleteAllButton.disabled = false;
-                bulkDeleteSelectedButton.disabled = false;
-                bulkDeleteSelectedButton.innerHTML =
-                    `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
-                stopButton.style.display = 'none';
+                const counts = getCounts();
+                clearCounts();
+                alert(`Selected items have been deleted.\n\n✅ Deleted: ${counts.success}\n❌ Failed: ${counts.fail}`);
+
+                if (uiElements.allBtn) uiElements.allBtn.disabled = false;
+                if (uiElements.selBtn) {
+                    uiElements.selBtn.disabled = false;
+                    uiElements.selBtn.innerHTML =
+                        `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
+                }
+                if (uiElements.stopBtn) uiElements.stopBtn.style.display = 'none';
             }
         }
     }
