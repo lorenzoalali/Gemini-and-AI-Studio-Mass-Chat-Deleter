@@ -42,10 +42,14 @@ You can use these *Greasy Fork* links or copy/paste the source code from *GitHub
 4.  The script will iterate through your sidebar to wipe all chats.
 5.  Click *🛑 Stop* at any time to pause.
 
+![Gemini](README-screenshot-gemini.png)
+
 ### For Google AI Studio
 1.  Navigate to your [AI Studio Library](https://aistudio.google.com/library).
 2.  **To Wipe Everything:** Click *🔥 Delete All*. The page will reload multiple times as it processes the batch deletion.
 3.  **To Delete Specifics:** Check the boxes next to the chats you want to remove, then click *🗑️ Delete Selected*.
+
+![Google AI Studio](README-screenshot-ai-studio.png)
 
 ## ⚠️ Disclaimer
 **Usage At Your Own Risk:**
