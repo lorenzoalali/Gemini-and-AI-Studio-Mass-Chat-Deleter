@@ -25,7 +25,7 @@
  * loss or issues that may arise.
  *
  * --- FUTURE COMPATIBILITY ---
- * This script's operation depends on the current Document Object Model (DOM) of the Google AI Studio platform.
+ * This script's operation depends on the current Document Object Model (DOM) of the Gemini platform.
  * Modifications to the website by Google are likely to render this script non-functional in the future. While the
  * author does not plan on providing proactive updates or support, contributions in the form of GitHub pull requests
  * are welcome.
