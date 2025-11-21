@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v4-toast
+// @version      2025-11-21-v5-greasy
 // @description  Bulk delete (mass-remove) chats from Gemini in batch.
 // @author       Lorenzo Alali
 // @match        https://gemini.google.com/*
