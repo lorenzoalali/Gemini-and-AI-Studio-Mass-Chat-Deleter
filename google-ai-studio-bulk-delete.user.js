@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google AI Studio Bulk Delete
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v2
+// @version      2025-11-21-v4-toast
 // @description  Bulk delete (mass-remove) chats from Google AI Studio in batch.
 // @author       Lorenzo Alali
 // @match        https://aistudio.google.com/*
@@ -49,6 +49,193 @@
         allBtn: null,
         selBtn: null,
         stopBtn: null
+    };
+
+    // --- UI Helper & Styles ---
+    const UI = {
+        injectStyles: () => {
+            if (document.getElementById('gas-bulk-delete-styles')) return;
+            const style = document.createElement('style');
+            style.id = 'gas-bulk-delete-styles';
+            style.textContent = `
+                .gas-toast-container {
+                    position: fixed;
+                    bottom: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 10000;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                    pointer-events: none;
+                }
+                .gas-toast {
+                    background: #333;
+                    color: #fff;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+                    font-size: 14px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    opacity: 0;
+                    transform: translateY(20px);
+                    transition: opacity 0.3s, transform 0.3s;
+                    pointer-events: auto;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    min-width: 300px;
+                    justify-content: center;
+                }
+                .gas-toast.visible {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+                .gas-toast.success { background: #0f9d58; }
+                .gas-toast.error { background: #d93025; }
+                .gas-toast.warning { background: #f4b400; color: #202124; }
+                .gas-toast.info { background: #1a73e8; }
+
+                .gas-modal-overlay {
+                    position: fixed;
+                    top: 0; left: 0; width: 100%; height: 100%;
+                    background: rgba(0,0,0,0.5);
+                    z-index: 10001;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    opacity: 0;
+                    transition: opacity 0.2s;
+                }
+                .gas-modal-overlay.visible { opacity: 1; }
+                .gas-modal {
+                    background: white;
+                    padding: 24px;
+                    border-radius: 8px;
+                    width: 400px;
+                    max-width: 90%;
+                    box-shadow: 0 1px 3px 0 rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15);
+                    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+                    transform: scale(0.95);
+                    transition: transform 0.2s;
+                }
+                .gas-modal-overlay.visible .gas-modal { transform: scale(1); }
+                .gas-modal-title {
+                    font-size: 18px;
+                    font-weight: 500;
+                    margin-bottom: 12px;
+                    color: #202124;
+                }
+                .gas-modal-content {
+                    font-size: 14px;
+                    color: #5f6368;
+                    line-height: 1.5;
+                    margin-bottom: 24px;
+                    white-space: pre-wrap;
+                }
+                .gas-modal-actions {
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 12px;
+                }
+                .gas-btn {
+                    border: none;
+                    background: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-weight: 500;
+                    font-size: 14px;
+                    transition: background 0.2s;
+                }
+                .gas-btn:hover { background: rgba(0,0,0,0.04); }
+                .gas-btn.primary {
+                    background: #1a73e8;
+                    color: white;
+                }
+                .gas-btn.primary:hover { background: #1557b0; }
+                .gas-btn.danger {
+                    background: #d93025;
+                    color: white;
+                }
+                .gas-btn.danger:hover { background: #a50e0e; }
+            `;
+            document.head.appendChild(style);
+        },
+
+        showToast: (message, type = 'info', duration = 3000) => {
+            UI.injectStyles();
+            let container = document.querySelector('.gas-toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.className = 'gas-toast-container';
+                document.body.appendChild(container);
+            }
+
+            const toast = document.createElement('div');
+            toast.className = `gas-toast ${type}`;
+
+            let icon = '';
+            if (type === 'success') icon = '✅';
+            if (type === 'error') icon = '❌';
+            if (type === 'warning') icon = '⚠️';
+            if (type === 'info') icon = 'ℹ️';
+
+            toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+            container.appendChild(toast);
+
+            // Trigger reflow
+            toast.offsetHeight;
+            toast.classList.add('visible');
+
+            if (duration > 0) {
+                setTimeout(() => {
+                    toast.classList.remove('visible');
+                    setTimeout(() => toast.remove(), 300);
+                }, duration);
+            }
+            return toast;
+        },
+
+        showConfirm: (title, message, confirmText = 'Confirm', confirmType = 'primary') => {
+            UI.injectStyles();
+            return new Promise((resolve) => {
+                const overlay = document.createElement('div');
+                overlay.className = 'gas-modal-overlay';
+
+                const modal = document.createElement('div');
+                modal.className = 'gas-modal';
+
+                modal.innerHTML = `
+                    <div class="gas-modal-title">${title}</div>
+                    <div class="gas-modal-content">${message}</div>
+                    <div class="gas-modal-actions">
+                        <button class="gas-btn cancel-btn">Cancel</button>
+                        <button class="gas-btn ${confirmType} confirm-btn">${confirmText}</button>
+                    </div>
+                `;
+
+                overlay.appendChild(modal);
+                document.body.appendChild(overlay);
+
+                // Trigger reflow
+                overlay.offsetHeight;
+                overlay.classList.add('visible');
+
+                const close = (result) => {
+                    overlay.classList.remove('visible');
+                    setTimeout(() => overlay.remove(), 200);
+                    resolve(result);
+                };
+
+                modal.querySelector('.cancel-btn').addEventListener('click', () => close(false));
+                modal.querySelector('.confirm-btn').addEventListener('click', () => close(true));
+                // Close on click outside
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) close(false);
+                });
+            });
+        }
     };
 
     // --- Configuration ---
@@ -128,7 +315,7 @@
             if (isStopRequested) {
                 sessionStorage.removeItem(aBULK_DELETE_ALL_KEY);
                 clearCounts();
-                alert("Bulk delete process stopped by user.");
+                UI.showToast("Bulk delete process stopped by user.", 'warning');
                 isProcessing = false;
                 break;
             }
@@ -247,7 +434,7 @@
     /**
      * Starts the 'Bulk Delete All' process.
      */
-    function startBulkDeleteAll(isAutoStart = false) {
+    async function startBulkDeleteAll(isAutoStart = false) {
         const query = 'ms-prompt-options-menu button[aria-label="More options"]';
         const items = document.querySelectorAll(query);
 
@@ -257,9 +444,9 @@
             clearCounts();
 
             if (counts.success > 0 || counts.fail > 0) {
-                alert(`Bulk delete complete.\n\n✅ Deleted: ${counts.success}\n❌ Failed: ${counts.fail}`);
+                UI.showToast(`Bulk delete complete. Deleted: ${counts.success}, Failed: ${counts.fail}`, 'success', 5000);
             } else {
-                alert("Bulk delete complete. Your library is now empty.");
+                UI.showToast("Bulk delete complete. Your library is now empty.", 'success', 5000);
             }
             isProcessing = false;
             return;
@@ -270,7 +457,13 @@
                 "This will bulk-delete ALL items in your history.\n\n" +
                 "It will delete items in batches of 5, reload the page, and " +
                 "continue until finished.\n\nAre you sure you want to proceed?";
-            const userConfirmation = confirm(confirmMsg);
+
+            const userConfirmation = await UI.showConfirm(
+                "Delete All Chats?",
+                confirmMsg,
+                "Delete All",
+                "danger"
+            );
             if (!userConfirmation) return;
             sessionStorage.setItem(aBULK_DELETE_ALL_KEY, 'true');
             resetCounts();
@@ -282,18 +475,23 @@
     /**
      * Starts the 'Bulk Delete Selected' process.
      */
-    function startBulkDeleteSelected() {
+    async function startBulkDeleteSelected() {
         sessionStorage.removeItem(aBULK_DELETE_ALL_KEY); // Safety clear
 
         const selector = '.bulk-delete-checkbox:checked';
         const selectedCheckboxes = document.querySelectorAll(selector);
         if (selectedCheckboxes.length === 0) {
-            alert("No items selected for deletion.");
+            UI.showToast("No items selected for deletion.", 'warning');
             return;
         }
 
         const confirmMsg = `Are you sure you want to delete the ${selectedCheckboxes.length} selected item(s)?`;
-        const userConfirmation = confirm(confirmMsg);
+        const userConfirmation = await UI.showConfirm(
+            "Delete Selected Chats?",
+            confirmMsg,
+            "Delete Selected",
+            "danger"
+        );
         if (!userConfirmation) return;
 
         const itemHrefs = Array.from(selectedCheckboxes).map(cb => {
@@ -454,9 +652,10 @@
             clearCounts();
             stopButton.innerHTML = `<span style="font-size: 1.2em;">🛑</span> <span>Stopping...</span>`;
             stopButton.disabled = true;
-            alert(
-                "Bulk delete will stop. The page will not reload " +
-                "after the current action."
+            UI.showToast(
+                "Bulk delete will stop. The page will not reload after the current action.",
+                'info',
+                5000
             );
         });
 
@@ -540,7 +739,7 @@
                 sessionStorage.removeItem(key);
                 const counts = getCounts();
                 clearCounts();
-                alert(`Selected items have been deleted.\n\n✅ Deleted: ${counts.success}\n❌ Failed: ${counts.fail}`);
+                UI.showToast(`Selected items have been deleted. Deleted: ${counts.success}, Failed: ${counts.fail}`, 'success', 5000);
 
                 if (uiElements.allBtn) uiElements.allBtn.disabled = false;
                 if (uiElements.selBtn) {

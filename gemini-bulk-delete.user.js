@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v3
+// @version      2025-11-21-v4-toast
 // @description  Bulk delete (mass-remove) chats from Gemini in batch.
 // @author       Lorenzo Alali
 // @match        https://gemini.google.com/*
@@ -79,6 +79,193 @@
     // --- State Variable ---
     let deletionInProgress = false;
 
+    // --- UI Helper & Styles ---
+    const UI = {
+        injectStyles: () => {
+            if (document.getElementById('gemini-bulk-delete-styles')) return;
+            const style = document.createElement('style');
+            style.id = 'gemini-bulk-delete-styles';
+            style.textContent = `
+                .gas-toast-container {
+                    position: fixed;
+                    bottom: 20px;
+                    left: 50%;
+                    transform: translateX(-50%);
+                    z-index: 10000;
+                    display: flex;
+                    flex-direction: column;
+                    gap: 10px;
+                    pointer-events: none;
+                }
+                .gas-toast {
+                    background: #333;
+                    color: #fff;
+                    padding: 12px 24px;
+                    border-radius: 8px;
+                    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+                    font-size: 14px;
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                    opacity: 0;
+                    transform: translateY(20px);
+                    transition: opacity 0.3s, transform 0.3s;
+                    pointer-events: auto;
+                    display: flex;
+                    align-items: center;
+                    gap: 8px;
+                    min-width: 300px;
+                    justify-content: center;
+                }
+                .gas-toast.visible {
+                    opacity: 1;
+                    transform: translateY(0);
+                }
+                .gas-toast.success { background: #0f9d58; }
+                .gas-toast.error { background: #d93025; }
+                .gas-toast.warning { background: #f4b400; color: #202124; }
+                .gas-toast.info { background: #1a73e8; }
+
+                .gas-modal-overlay {
+                    position: fixed;
+                    top: 0; left: 0; width: 100%; height: 100%;
+                    background: rgba(0,0,0,0.5);
+                    z-index: 10001;
+                    display: flex;
+                    align-items: center;
+                    justify-content: center;
+                    opacity: 0;
+                    transition: opacity 0.2s;
+                }
+                .gas-modal-overlay.visible { opacity: 1; }
+                .gas-modal {
+                    background: white;
+                    padding: 24px;
+                    border-radius: 8px;
+                    width: 400px;
+                    max-width: 90%;
+                    box-shadow: 0 1px 3px 0 rgba(60,64,67,0.3), 0 4px 8px 3px rgba(60,64,67,0.15);
+                    font-family: 'Google Sans', Roboto, Arial, sans-serif;
+                    transform: scale(0.95);
+                    transition: transform 0.2s;
+                }
+                .gas-modal-overlay.visible .gas-modal { transform: scale(1); }
+                .gas-modal-title {
+                    font-size: 18px;
+                    font-weight: 500;
+                    margin-bottom: 12px;
+                    color: #202124;
+                }
+                .gas-modal-content {
+                    font-size: 14px;
+                    color: #5f6368;
+                    line-height: 1.5;
+                    margin-bottom: 24px;
+                    white-space: pre-wrap;
+                }
+                .gas-modal-actions {
+                    display: flex;
+                    justify-content: flex-end;
+                    gap: 12px;
+                }
+                .gas-btn {
+                    border: none;
+                    background: none;
+                    padding: 8px 16px;
+                    border-radius: 4px;
+                    cursor: pointer;
+                    font-weight: 500;
+                    font-size: 14px;
+                    transition: background 0.2s;
+                }
+                .gas-btn:hover { background: rgba(0,0,0,0.04); }
+                .gas-btn.primary {
+                    background: #1a73e8;
+                    color: white;
+                }
+                .gas-btn.primary:hover { background: #1557b0; }
+                .gas-btn.danger {
+                    background: #d93025;
+                    color: white;
+                }
+                .gas-btn.danger:hover { background: #a50e0e; }
+            `;
+            document.head.appendChild(style);
+        },
+
+        showToast: (message, type = 'info', duration = 3000) => {
+            UI.injectStyles();
+            let container = document.querySelector('.gas-toast-container');
+            if (!container) {
+                container = document.createElement('div');
+                container.className = 'gas-toast-container';
+                document.body.appendChild(container);
+            }
+
+            const toast = document.createElement('div');
+            toast.className = `gas-toast ${type}`;
+
+            let icon = '';
+            if (type === 'success') icon = '✅';
+            if (type === 'error') icon = '❌';
+            if (type === 'warning') icon = '⚠️';
+            if (type === 'info') icon = 'ℹ️';
+
+            toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+            container.appendChild(toast);
+
+            // Trigger reflow
+            toast.offsetHeight;
+            toast.classList.add('visible');
+
+            if (duration > 0) {
+                setTimeout(() => {
+                    toast.classList.remove('visible');
+                    setTimeout(() => toast.remove(), 300);
+                }, duration);
+            }
+            return toast;
+        },
+
+        showConfirm: (title, message, confirmText = 'Confirm', confirmType = 'primary') => {
+            UI.injectStyles();
+            return new Promise((resolve) => {
+                const overlay = document.createElement('div');
+                overlay.className = 'gas-modal-overlay';
+
+                const modal = document.createElement('div');
+                modal.className = 'gas-modal';
+
+                modal.innerHTML = `
+                    <div class="gas-modal-title">${title}</div>
+                    <div class="gas-modal-content">${message}</div>
+                    <div class="gas-modal-actions">
+                        <button class="gas-btn cancel-btn">Cancel</button>
+                        <button class="gas-btn ${confirmType} confirm-btn">${confirmText}</button>
+                    </div>
+                `;
+
+                overlay.appendChild(modal);
+                document.body.appendChild(overlay);
+
+                // Trigger reflow
+                overlay.offsetHeight;
+                overlay.classList.add('visible');
+
+                const close = (result) => {
+                    overlay.classList.remove('visible');
+                    setTimeout(() => overlay.remove(), 200);
+                    resolve(result);
+                };
+
+                modal.querySelector('.cancel-btn').addEventListener('click', () => close(false));
+                modal.querySelector('.confirm-btn').addEventListener('click', () => close(true));
+                // Close on click outside
+                overlay.addEventListener('click', (e) => {
+                    if (e.target === overlay) close(false);
+                });
+            });
+        }
+    };
+
     // --- Helper Functions ---
 
     function waitForElement(selector, timeout = 3000, parent = document) {
@@ -121,13 +308,19 @@
         // Verify Sidebar visibility before starting
         const historyContainerCheck = document.querySelector('div.conversations-container');
         if (!historyContainerCheck) {
-            alert("Error: Chat history is not visible.\n\nPlease open the sidebar (click the Menu icon ☰ top-left) to load the chat list, then try again.");
+            UI.showToast("Error: Chat history is not visible. Please open the sidebar.", 'error', 5000);
             return;
         }
 
-        if (!confirm("Are you sure you want to permanently delete all chats visible in the sidebar?\n\n(Pinned chats & Gems will be preserved)")) {
-            return;
-        }
+        const confirmMsg = "Are you sure you want to permanently delete all chats visible in the sidebar?\n\n(Pinned chats & Gems will be preserved)";
+        const userConfirmation = await UI.showConfirm(
+            "Delete All Chats?",
+            confirmMsg,
+            "Delete All",
+            "danger"
+        );
+
+        if (!userConfirmation) return;
 
         if (deletionInProgress) return;
         deletionInProgress = true;
@@ -214,7 +407,7 @@
                 consecutiveFailures++;
 
                 if (consecutiveFailures > 5) {
-                    alert("Too many consecutive errors. Stopping.");
+                    UI.showToast("Too many consecutive errors. Stopping.", 'error');
                     deletionInProgress = false;
                 }
 
@@ -227,9 +420,9 @@
         updateButtonState();
 
         if (successCount > 0 || failureCount > 0) {
-            alert(`Deletion Complete!\n\n✅ Deleted: ${successCount}\n❌ Errors: ${failureCount}`);
+            UI.showToast(`Deletion Complete! Deleted: ${successCount}, Errors: ${failureCount}`, 'success', 5000);
         } else {
-            alert("No chats found to delete (or all remaining chats are pinned).");
+            UI.showToast("No chats found to delete (or all remaining chats are pinned).", 'warning', 5000);
         }
     }
 
@@ -240,6 +433,7 @@
             if (stopBtn) {
                 stopBtn.innerHTML = '<span class="bulk-delete-emoji">🛑</span> Stopping...';
                 stopBtn.disabled = true;
+                UI.showToast("Bulk delete will stop after the current action.", 'info');
             }
         }
     }
