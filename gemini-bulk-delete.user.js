@@ -719,8 +719,8 @@
                 UI.showToast("No chats selected.", 'warning');
                 return;
             }
-            title = `Delete ${selectedChats.size} Selected Chats?`;
-            confirmMsg = `Are you sure you want to delete the ${selectedChats.size} selected chats? This cannot be undone.`;
+            title = `Delete ${selectedChats.size} Selected Chat(s)?`;
+            confirmMsg = `Are you sure you want to delete the ${selectedChats.size} selected chat(s)? This cannot be undone.`;
             confirmBtnText = "Delete Selected";
         } else {
             title = "Delete All Chats?";

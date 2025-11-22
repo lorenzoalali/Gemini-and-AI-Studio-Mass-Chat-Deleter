@@ -704,13 +704,13 @@
         const selector = '.bulk-delete-checkbox:checked';
         const selectedCheckboxes = document.querySelectorAll(selector);
         if (selectedCheckboxes.length === 0) {
-            UI.showToast("No items selected for deletion.", 'warning');
+            UI.showToast("No chat(s) selected for deletion.", 'warning');
             return;
         }
 
-        const confirmMsg = `Are you sure you want to delete the ${selectedCheckboxes.length} selected item(s)?`;
+        const confirmMsg = `Are you sure you want to delete the ${selectedCheckboxes.length} selected chat(s)?`;
         const userConfirmation = await UI.showConfirm(
-            "Delete Selected Chats?",
+            "Delete Selected Chat(s)?",
             confirmMsg,
             "Delete Selected",
             "danger"
@@ -1063,7 +1063,7 @@
                 const counts = getCounts();
                 clearCounts();
                 UI.hideProgress();
-                UI.showToast(`Selected items have been deleted. Deleted: ${counts.success}, Failed: ${counts.fail}`, 'success', 5000);
+                UI.showToast(`Selected chat(s) have been deleted. Deleted: ${counts.success}, Failed: ${counts.fail}`, 'success', 5000);
 
                 if (uiElements.allBtn) uiElements.allBtn.disabled = false;
                 if (uiElements.selBtn) {
