@@ -1,5 +1,5 @@
 // ==UserScript==
-// @name         Google AI Studio Bulk Delete
+// @name         Google AI Studio Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
 // @version      2025-11-21-v7-eod
 // @description  Bulk delete (mass-remove) chats from Google AI Studio in batch.
