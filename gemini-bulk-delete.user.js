@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Gemini Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v7-eod
+// @version      2025-11-27
 // @description  Bulk delete (mass-remove) chats from Gemini in batch. Select specific chats or delete all.
 // @author       Lorenzo Alali
 // @match        https://gemini.google.com/*
@@ -36,6 +36,35 @@
 
 (function () {
     'use strict';
+
+    // --- DOM Selectors (Updated 2025-11-27 for Gemini UI) ---
+    const SELECTORS = {
+        CHAT_CONTAINER: '.chat-history', // The scrollable container with chats
+        CHAT_ITEM: 'div[data-test-id="conversation"]', // Individual chat item
+        CHAT_TITLE: '.conversation-title',
+        PINNED_ICON: '.pin-icon-container mat-icon', // Check for pinned icon
+        MENU_BUTTON: 'button[data-test-id="actions-menu-button"]', // "More options" button
+        DELETE_MENU_ITEM: 'button[data-test-id="delete-button"], div[role="menu"] button:has(mat-icon[data-mat-icon-name="delete"])', // Delete menu option
+        CONFIRM_DIALOG: 'mat-dialog-container',
+        CONFIRM_BUTTON: 'button[data-test-id="confirm-button"]', // Confirmation button
+        CANCEL_BUTTON: 'button[data-test-id="cancel-button"]' // Cancel button
+    };
+
+    // Trusted Types Policy for safe HTML insertion
+    let policy = null;
+    if (window.trustedTypes && window.trustedTypes.createPolicy) {
+        try {
+            policy = window.trustedTypes.createPolicy('geminiBulkDeletePolicy', {
+                createHTML: (string) => string
+            });
+        } catch (e) {
+            console.warn('TrustedTypes policy creation failed or already exists:', e);
+        }
+    }
+
+    const safeHTML = (html) => {
+        return policy ? policy.createHTML(html) : html;
+    };
 
     // --- Styles ---
     const css = `
@@ -115,23 +144,20 @@
             border-color: #0B57D0;
         }
         
-        /* Row Alignment Fix */
+        /* Row Alignment Fix - Updated for Nov 2025 UI */
         .gemini-bulk-delete-row {
             display: flex !important;
             align-items: center !important;
             flex-direction: row !important;
+            gap: 8px !important;
         }
-        .gemini-bulk-delete-row > .conversation {
+        /* Ensure other children of the chat item don't shrink */
+        .gemini-bulk-delete-row > *:not(.bulk-delete-checkbox) {
             flex: 1 !important;
             min-width: 0 !important; /* Critical for text truncation in flex containers */
         }
         
-        /* Highlight for Dry Run */
-        .bulk-delete-highlight {
-            background-color: rgba(242, 153, 0, 0.2) !important;
-            border: 2px dashed #F29900 !important;
-            border-radius: 4px;
-        }
+
     `;
     GM_addStyle(css);
 
@@ -332,7 +358,7 @@
             if (type === 'warning') icon = '⚠️';
             if (type === 'info') icon = 'ℹ️';
 
-            toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+            toast.innerHTML = safeHTML(`<span>${icon}</span><span>${message}</span>`);
             container.appendChild(toast);
 
             // Trigger reflow
@@ -357,14 +383,14 @@
                 const modal = document.createElement('div');
                 modal.className = 'gas-modal';
 
-                modal.innerHTML = `
+                modal.innerHTML = safeHTML(`
                     <div class="gas-modal-title">${title}</div>
                     <div class="gas-modal-content">${message}</div>
                     <div class="gas-modal-actions">
                         <button class="gas-btn secondary cancel-btn">Cancel</button>
                         <button class="gas-btn ${confirmType} confirm-btn">${confirmText}</button>
                     </div>
-                `;
+                `);
 
                 overlay.appendChild(modal);
                 document.body.appendChild(overlay);
@@ -397,7 +423,7 @@
             container.className = 'gas-progress-container';
             container.id = 'gas-progress-ui';
 
-            container.innerHTML = `
+            container.innerHTML = safeHTML(`
                 <div class="gas-progress-header">
                     <span id="gas-progress-text">${message}</span>
                     <span id="gas-progress-percent">0%</span>
@@ -406,7 +432,7 @@
                     <div class="gas-progress-bar-fill" id="gas-progress-fill"></div>
                 </div>
                 <div class="gas-progress-details" id="gas-progress-count">0 of ${total}</div>
-            `;
+            `);
 
             document.body.appendChild(container);
 
@@ -457,11 +483,11 @@
                 let remaining = seconds;
 
                 const updateText = () => {
-                    toast.innerHTML = `
+                    toast.innerHTML = safeHTML(`
                         <span>⏳</span>
                         <span style="flex:1">Starting deletion in ${remaining}s...</span>
                         <button id="gas-undo-cancel" style="background:transparent;border:1px solid white;color:white;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:12px;">CANCEL</button>
-                    `;
+                    `);
                 };
 
                 updateText();
@@ -538,18 +564,17 @@
     // --- Checkbox Injection Logic ---
 
     function injectCheckboxes() {
-        const historyContainer = document.querySelector('div.conversations-container');
+        const historyContainer = document.querySelector(SELECTORS.CHAT_CONTAINER);
         if (!historyContainer) return;
 
-        const chatItems = Array.from(historyContainer.querySelectorAll('.conversation-actions-container'));
+        const chatItems = Array.from(historyContainer.querySelectorAll(SELECTORS.CHAT_ITEM));
 
         chatItems.forEach((item, index) => {
             // Check if we already injected a checkbox
-            if (item.parentElement.querySelector('.bulk-delete-checkbox')) return;
+            if (item.querySelector('.bulk-delete-checkbox')) return;
 
             // Check if pinned
-            const previousSibling = item.previousElementSibling;
-            const isPinned = previousSibling && previousSibling.querySelector('.conversation-pin-icon');
+            const isPinned = item.querySelector(SELECTORS.PINNED_ICON);
 
             // Do NOT inject checkbox for pinned chats
             if (isPinned) return;
@@ -577,21 +602,12 @@
                             const cb = allCheckboxes[i];
                             cb.checked = lastCheckedCheckbox.checked; // Match the state of the first clicked
 
-                            // Find the associated chat item (parent's sibling logic)
-                            // The checkbox is inserted before the link, which is before the actions container.
-                            // Structure: [Checkbox] [Link] [Actions]
-                            // We need to find [Actions] to add to selectedChats
-                            // The actions container is the NEXT sibling of the NEXT sibling of the checkbox (Checkbox -> Link -> Actions)
-                            // OR Checkbox -> Actions (if link missing/different structure)
-
-                            // Let's rely on the fact that we injected it into the parent.
-                            // We can find the actions container by looking for .conversation-actions-container in the parent
-                            const actions = cb.parentElement.querySelector('.conversation-actions-container');
-                            if (actions) {
+                            const chatItem = cb.closest(SELECTORS.CHAT_ITEM);
+                            if (chatItem) {
                                 if (cb.checked) {
-                                    selectedChats.add(actions);
+                                    selectedChats.add(chatItem);
                                 } else {
-                                    selectedChats.delete(actions);
+                                    selectedChats.delete(chatItem);
                                 }
                             }
                         }
@@ -609,14 +625,9 @@
                 updateButtonState();
             });
 
-            // Insert before the chat link (which is usually the previous sibling of the actions container)
-            if (previousSibling) {
-                previousSibling.parentElement.insertBefore(checkbox, previousSibling);
-                previousSibling.parentElement.classList.add('gemini-bulk-delete-row');
-            } else {
-                item.parentElement.insertBefore(checkbox, item);
-                item.parentElement.classList.add('gemini-bulk-delete-row');
-            }
+            // Insert at the beginning of the chat item
+            item.prepend(checkbox);
+            item.classList.add('gemini-bulk-delete-row');
         });
     }
 
@@ -624,87 +635,25 @@
         const allCheckboxes = document.querySelectorAll('.bulk-delete-checkbox');
         allCheckboxes.forEach(cb => {
             cb.checked = shouldSelect;
-            const actions = cb.parentElement.querySelector('.conversation-actions-container');
-            if (actions) {
+            // The checkbox is now directly inside the chat item (SELECTORS.CHAT_ITEM)
+            const chatItem = cb.closest(SELECTORS.CHAT_ITEM);
+            if (chatItem) {
                 if (shouldSelect) {
-                    selectedChats.add(actions);
+                    selectedChats.add(chatItem);
                 } else {
-                    selectedChats.delete(actions);
+                    selectedChats.delete(chatItem);
                 }
             }
         });
         updateButtonState();
     }
 
-    async function loadAllChats() {
-        const historyContainer = document.querySelector('div.conversations-container');
-        if (!historyContainer) {
-            UI.showToast("Sidebar not found!", 'error');
-            return;
-        }
-
-        UI.showToast("Scrolling to load all chats...", 'info');
-        let previousHeight = 0;
-        let currentHeight = historyContainer.scrollHeight;
-        let attempts = 0;
-
-        while (previousHeight !== currentHeight && attempts < 50) { // Max 50 scrolls to prevent infinite loop
-            previousHeight = currentHeight;
-            historyContainer.scrollTop = currentHeight;
-            await sleep(800); // Wait for load
-            currentHeight = historyContainer.scrollHeight;
-            attempts++;
-        }
-
-        UI.showToast("Finished loading chats.", 'success');
-        // Re-inject checkboxes for newly loaded items
-        injectCheckboxes();
-    }
-
-    function simulateDelete() {
-        const mode = selectedChats.size > 0 ? 'SELECTED' : 'ALL';
-        let targets = [];
-
-        if (mode === 'SELECTED') {
-            targets = Array.from(selectedChats);
-        } else {
-            const historyContainer = document.querySelector('div.conversations-container');
-            if (historyContainer) {
-                const allChats = Array.from(historyContainer.querySelectorAll('.conversation-actions-container'));
-                targets = allChats.filter(item => {
-                    const previousSibling = item.previousElementSibling;
-                    const isPinned = previousSibling && previousSibling.querySelector('.conversation-pin-icon');
-                    return !isPinned;
-                });
-            }
-        }
-
-        if (targets.length === 0) {
-            UI.showToast("No chats to simulate.", 'warning');
-            return;
-        }
-
-        // Highlight
-        targets.forEach(el => {
-            // Highlight the whole row
-            el.parentElement.classList.add('bulk-delete-highlight');
-        });
-
-        UI.showToast(`DRY RUN: Would delete ${targets.length} chat(s).`, 'info', 4000);
-
-        // Remove highlight after 4 seconds
-        setTimeout(() => {
-            targets.forEach(el => {
-                el.parentElement.classList.remove('bulk-delete-highlight');
-            });
-        }, 4000);
-    }
 
     // --- Core Deletion Logic ---
 
     async function startBulkDelete(mode = 'ALL') {
         // Verify Sidebar visibility before starting
-        const historyContainerCheck = document.querySelector('div.conversations-container');
+        const historyContainerCheck = document.querySelector(SELECTORS.CHAT_CONTAINER);
         if (!historyContainerCheck) {
             UI.showToast("Error: Chat history is not visible. Please open the sidebar.", 'error', 5000);
             return;
@@ -767,13 +716,12 @@
             document.querySelectorAll('.bulk-delete-checkbox').forEach(cb => cb.checked = false);
 
             // Estimate total for progress bar
-            const historyContainer = document.querySelector('div.conversations-container');
+            const historyContainer = document.querySelector(SELECTORS.CHAT_CONTAINER);
             if (historyContainer) {
-                const allChats = Array.from(historyContainer.querySelectorAll('.conversation-actions-container'));
+                const allChats = Array.from(historyContainer.querySelectorAll(SELECTORS.CHAT_ITEM));
                 // Filter out pinned
                 const deletableChats = allChats.filter(item => {
-                    const previousSibling = item.previousElementSibling;
-                    const isPinned = previousSibling && previousSibling.querySelector('.conversation-pin-icon');
+                    const isPinned = item.querySelector(SELECTORS.PINNED_ICON);
                     return !isPinned;
                 });
                 totalItemsToProcess = deletableChats.length;
@@ -786,17 +734,17 @@
 
         while (deletionInProgress) {
             try {
-                let targetActionContainer = null;
+                let targetItem = null;
 
                 if (mode === 'SELECTED') {
                     if (itemsToProcess.length === 0) {
                         GM_log("✅ Finished processing selected items.");
                         break;
                     }
-                    targetActionContainer = itemsToProcess.shift(); // Get next item
+                    targetItem = itemsToProcess.shift(); // Get next item
 
                     // Verify it still exists in DOM
-                    if (!document.body.contains(targetActionContainer)) {
+                    if (!document.body.contains(targetItem)) {
                         GM_log("⚠️ Item no longer in DOM, skipping.");
                         processedCount++;
                         UI.updateProgress(processedCount, totalItemsToProcess);
@@ -813,29 +761,37 @@
                     // Find first non-pinned
                     for (const item of chatItems) {
                         const previousSibling = item.previousElementSibling;
-                        const isPinned = previousSibling && previousSibling.querySelector('.conversation-pin-icon');
+                        const isPinned = item.querySelector(SELECTORS.PINNED_ICON);
                         if (!isPinned) {
-                            targetActionContainer = item;
+                            targetItem = item;
                             break;
                         }
                     }
 
-                    if (!targetActionContainer) {
+                    if (!targetItem) {
                         GM_log("✅ No more non-pinned chats found.");
                         break;
                     }
                 }
 
-                // --- Perform Deletion on targetActionContainer ---
+                // --- Perform Deletion on targetItem ---
 
                 // Force visibility
-                targetActionContainer.style.visibility = 'visible';
-                targetActionContainer.style.opacity = '1';
+                targetItem.style.visibility = 'visible';
+                targetItem.style.opacity = '1';
 
-                const optionsButton = targetActionContainer.querySelector('button[data-test-id="actions-menu-button"]');
+                // Find the menu button - it's in the next sibling (.conversation-actions-container)
+                // or within the parent element
+                let optionsButton = targetItem.nextElementSibling?.querySelector(SELECTORS.MENU_BUTTON);
+                if (!optionsButton) {
+                    optionsButton = targetItem.parentElement?.querySelector(SELECTORS.MENU_BUTTON);
+                }
 
                 if (!optionsButton) {
-                    targetActionContainer.remove(); // Remove stuck element locally if button missing
+                    GM_log("⚠️ Menu button not found for item, skipping.");
+                    failureCount++;
+                    processedCount++;
+                    UI.updateProgress(processedCount, totalItemsToProcess);
                     continue;
                 }
 
@@ -844,13 +800,13 @@
                 await sleep(500);
 
                 // Find 'Delete' in dropdown menu
-                const deleteMenuItem = await waitForElement('div[role="menu"] button:has(mat-icon[data-mat-icon-name="delete"])', 2000, document.body);
+                const deleteMenuItem = await waitForElement(SELECTORS.DELETE_MENU_ITEM, 2000, document.body);
                 deleteMenuItem.click();
                 await sleep(500);
 
                 // Confirm Dialog
-                const dialog = await waitForElement('mat-dialog-container', 2000, document.body);
-                const confirmBtn = dialog.querySelector('button[data-test-id="confirm-button"]');
+                const dialog = await waitForElement(SELECTORS.CONFIRM_DIALOG, 2000, document.body);
+                const confirmBtn = dialog.querySelector(SELECTORS.CONFIRM_BUTTON);
 
                 if (!confirmBtn) throw new Error("Confirmation button not found.");
 
@@ -871,7 +827,7 @@
                     // The parent element usually gets removed by Gemini, but we can ensure the checkbox is gone
                     // We don't need to do much as the DOM update should handle it.
                     // But we should remove it from our set.
-                    selectedChats.delete(targetActionContainer);
+                    selectedChats.delete(targetItem);
                 }
 
             } catch (error) {
@@ -909,7 +865,7 @@
             deletionInProgress = false;
             const stopBtn = document.getElementById('stop-delete-btn');
             if (stopBtn) {
-                stopBtn.innerHTML = '<span class="bulk-delete-emoji">🛑</span> Stopping...';
+                stopBtn.innerHTML = safeHTML('<span class="bulk-delete-emoji">🛑</span> Stopping...');
                 stopBtn.disabled = true;
                 UI.showToast("Bulk delete will stop after the current action.", 'info');
             }
@@ -950,27 +906,13 @@
 
         selectAllContainer.appendChild(selectAllCheckbox);
 
-        // Load All Button
-        const loadAllBtn = document.createElement('button');
-        loadAllBtn.className = 'bulk-delete-btn btn-blue';
-        loadAllBtn.innerHTML = '<span class="bulk-delete-emoji">⬇️</span>';
-        loadAllBtn.title = "Scroll down to load all chats";
-        loadAllBtn.style.padding = "8px 12px";
-        loadAllBtn.onclick = loadAllChats;
 
-        // Simulate Button (Dry Run)
-        const simulateBtn = document.createElement('button');
-        simulateBtn.className = 'bulk-delete-btn btn-orange';
-        simulateBtn.innerHTML = '<span class="bulk-delete-emoji">🧪</span>';
-        simulateBtn.title = "Simulate Deletion (Dry Run)";
-        simulateBtn.style.padding = "8px 12px";
-        simulateBtn.onclick = simulateDelete;
 
         // Delete Selected Button
         const deleteSelectedBtn = document.createElement('button');
         deleteSelectedBtn.id = 'delete-selected-btn';
         deleteSelectedBtn.className = 'bulk-delete-btn btn-orange';
-        deleteSelectedBtn.innerHTML = '<span class="bulk-delete-emoji">✅</span>&nbsp;Delete Selected';
+        deleteSelectedBtn.innerHTML = safeHTML('<span class="bulk-delete-emoji">✅</span>&nbsp;Delete Selected');
         deleteSelectedBtn.title = "Delete selected chats";
         deleteSelectedBtn.disabled = true; // Disabled by default
         deleteSelectedBtn.onclick = () => startBulkDelete('SELECTED');
@@ -979,7 +921,7 @@
         const startBtn = document.createElement('button');
         startBtn.id = 'start-delete-btn';
         startBtn.className = 'bulk-delete-btn btn-red';
-        startBtn.innerHTML = '<span class="bulk-delete-emoji">🔥</span>&nbsp;Delete All';
+        startBtn.innerHTML = safeHTML('<span class="bulk-delete-emoji">🔥</span>&nbsp;Delete All');
         startBtn.title = "Delete all chats in sidebar (except pinned chats & Gems)";
         startBtn.onclick = () => startBulkDelete('ALL');
 
@@ -987,13 +929,11 @@
         const stopBtn = document.createElement('button');
         stopBtn.id = 'stop-delete-btn';
         stopBtn.className = 'bulk-delete-btn btn-blue';
-        stopBtn.innerHTML = '<span class="bulk-delete-emoji">🛑</span> Stop';
+        stopBtn.innerHTML = safeHTML('<span class="bulk-delete-emoji">🛑</span> Stop');
         stopBtn.style.display = 'none';
         stopBtn.onclick = stopBulkDelete;
 
         container.appendChild(selectAllContainer);
-        container.appendChild(loadAllBtn);
-        container.appendChild(simulateBtn);
         container.appendChild(deleteSelectedBtn);
         container.appendChild(startBtn);
         container.appendChild(stopBtn);
@@ -1013,14 +953,14 @@
                 deleteSelected.style.display = 'none';
                 stop.style.display = 'inline-flex';
                 stop.disabled = false;
-                stop.innerHTML = '<span class="bulk-delete-emoji">🛑</span> Stop';
+                stop.innerHTML = safeHTML('<span class="bulk-delete-emoji">🛑</span> Stop');
             } else {
                 start.style.display = 'inline-flex';
-                start.innerHTML = '<span class="bulk-delete-emoji">🔥</span>&nbsp;Delete All';
+                start.innerHTML = safeHTML('<span class="bulk-delete-emoji">🔥</span>&nbsp;Delete All');
 
                 deleteSelected.style.display = 'inline-flex';
                 deleteSelected.disabled = selectedChats.size === 0;
-                deleteSelected.innerHTML = `<span class="bulk-delete-emoji">✅</span>&nbsp;Delete Selected (${selectedChats.size})`;
+                deleteSelected.innerHTML = safeHTML(`<span class="bulk-delete-emoji">✅</span>&nbsp;Delete Selected (${selectedChats.size})`);
 
                 stop.style.display = 'none';
             }

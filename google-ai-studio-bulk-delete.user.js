@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         Google AI Studio Bulk Chat Deleter
 // @namespace    http://tampermonkey.net/
-// @version      2025-11-21-v7-eod
+// @version      2025-11-29
 // @description  Bulk delete (mass-remove) chats from Google AI Studio in batch.
 // @author       Lorenzo Alali
 // @match        https://aistudio.google.com/*
@@ -225,12 +225,6 @@
                     color: rgba(255,255,255,0.7);
                     text-align: right;
                 }
-
-                /* Highlight for Dry Run */
-                .bulk-delete-highlight {
-                    background-color: rgba(242, 153, 0, 0.2) !important;
-                    border: 2px dashed #F29900 !important;
-                }
             `;
             document.head.appendChild(style);
         },
@@ -247,13 +241,19 @@
             const toast = document.createElement('div');
             toast.className = `gas-toast ${type}`;
 
+            const iconSpan = document.createElement('span');
             let icon = '';
             if (type === 'success') icon = '✅';
             if (type === 'error') icon = '❌';
             if (type === 'warning') icon = '⚠️';
             if (type === 'info') icon = 'ℹ️';
+            iconSpan.textContent = icon;
 
-            toast.innerHTML = `<span>${icon}</span><span>${message}</span>`;
+            const msgSpan = document.createElement('span');
+            msgSpan.textContent = message;
+
+            toast.appendChild(iconSpan);
+            toast.appendChild(msgSpan);
             container.appendChild(toast);
 
             // Trigger reflow
@@ -278,15 +278,31 @@
                 const modal = document.createElement('div');
                 modal.className = 'gas-modal';
 
-                modal.innerHTML = `
-                    <div class="gas-modal-title">${title}</div>
-                    <div class="gas-modal-content">${message}</div>
-                    <div class="gas-modal-actions">
-                        <button class="gas-btn secondary cancel-btn">Cancel</button>
-                        <button class="gas-btn ${confirmType} confirm-btn">${confirmText}</button>
-                    </div>
-                `;
+                const titleDiv = document.createElement('div');
+                titleDiv.className = 'gas-modal-title';
+                titleDiv.textContent = title;
 
+                const contentDiv = document.createElement('div');
+                contentDiv.className = 'gas-modal-content';
+                contentDiv.textContent = message;
+
+                const actionsDiv = document.createElement('div');
+                actionsDiv.className = 'gas-modal-actions';
+
+                const cancelBtn = document.createElement('button');
+                cancelBtn.className = 'gas-btn secondary cancel-btn';
+                cancelBtn.textContent = 'Cancel';
+
+                const confirmBtn = document.createElement('button');
+                confirmBtn.className = `gas-btn ${confirmType} confirm-btn`;
+                confirmBtn.textContent = confirmText;
+
+                actionsDiv.appendChild(cancelBtn);
+                actionsDiv.appendChild(confirmBtn);
+
+                modal.appendChild(titleDiv);
+                modal.appendChild(contentDiv);
+                modal.appendChild(actionsDiv);
                 overlay.appendChild(modal);
                 document.body.appendChild(overlay);
 
@@ -300,8 +316,8 @@
                     resolve(result);
                 };
 
-                modal.querySelector('.cancel-btn').addEventListener('click', () => close(false));
-                modal.querySelector('.confirm-btn').addEventListener('click', () => close(true));
+                cancelBtn.addEventListener('click', () => close(false));
+                confirmBtn.addEventListener('click', () => close(true));
                 // Close on click outside
                 overlay.addEventListener('click', (e) => {
                     if (e.target === overlay) close(false);
@@ -318,16 +334,36 @@
             container.className = 'gas-progress-container';
             container.id = 'gas-progress-ui';
 
-            container.innerHTML = `
-                <div class="gas-progress-header">
-                    <span id="gas-progress-text">${message}</span>
-                    <span id="gas-progress-percent">0%</span>
-                </div>
-                <div class="gas-progress-bar-bg">
-                    <div class="gas-progress-bar-fill" id="gas-progress-fill"></div>
-                </div>
-                <div class="gas-progress-details" id="gas-progress-count">0 of ${total}</div>
-            `;
+            const header = document.createElement('div');
+            header.className = 'gas-progress-header';
+
+            const msgSpan = document.createElement('span');
+            msgSpan.id = 'gas-progress-text';
+            msgSpan.textContent = message;
+
+            const percentSpan = document.createElement('span');
+            percentSpan.id = 'gas-progress-percent';
+            percentSpan.textContent = '0%';
+
+            header.appendChild(msgSpan);
+            header.appendChild(percentSpan);
+
+            const barBg = document.createElement('div');
+            barBg.className = 'gas-progress-bar-bg';
+
+            const barFill = document.createElement('div');
+            barFill.className = 'gas-progress-bar-fill';
+            barFill.id = 'gas-progress-fill';
+            barBg.appendChild(barFill);
+
+            const details = document.createElement('div');
+            details.className = 'gas-progress-details';
+            details.id = 'gas-progress-count';
+            details.textContent = `0 of ${total}`;
+
+            container.appendChild(header);
+            container.appendChild(barBg);
+            container.appendChild(details);
 
             document.body.appendChild(container);
 
@@ -376,13 +412,46 @@
                 toast.id = 'gas-undo-toast';
 
                 let remaining = seconds;
+                let interval;
 
                 const updateText = () => {
-                    toast.innerHTML = `
-                        <span>⏳</span>
-                        <span style="flex:1">Starting deletion in ${remaining}s...</span>
-                        <button id="gas-undo-cancel" style="background:transparent;border:1px solid white;color:white;border-radius:4px;padding:4px 8px;cursor:pointer;font-size:12px;">CANCEL</button>
-                    `;
+                    // Clear current content
+                    while (toast.firstChild) {
+                        toast.removeChild(toast.firstChild);
+                    }
+
+                    const iconSpan = document.createElement('span');
+                    iconSpan.textContent = '⏳';
+
+                    const msgSpan = document.createElement('span');
+                    msgSpan.style.flex = '1';
+                    msgSpan.textContent = `Starting deletion in ${remaining}s...`;
+
+                    const cancelBtn = document.createElement('button');
+                    cancelBtn.id = 'gas-undo-cancel';
+                    Object.assign(cancelBtn.style, {
+                        background: 'transparent',
+                        border: '1px solid white',
+                        color: 'white',
+                        borderRadius: '4px',
+                        padding: '4px 8px',
+                        cursor: 'pointer',
+                        fontSize: '12px'
+                    });
+                    cancelBtn.textContent = 'CANCEL';
+
+                    cancelBtn.addEventListener('click', handleCancel);
+
+                    toast.appendChild(iconSpan);
+                    toast.appendChild(msgSpan);
+                    toast.appendChild(cancelBtn);
+                };
+
+                const handleCancel = () => {
+                    clearInterval(interval);
+                    toast.classList.remove('visible');
+                    setTimeout(() => toast.remove(), 300);
+                    resolve(false); // Cancelled
                 };
 
                 updateText();
@@ -392,7 +461,7 @@
                 toast.offsetHeight;
                 toast.classList.add('visible');
 
-                const interval = setInterval(() => {
+                interval = setInterval(() => {
                     remaining--;
                     if (remaining <= 0) {
                         clearInterval(interval);
@@ -401,20 +470,8 @@
                         resolve(true); // Timer finished
                     } else {
                         updateText();
-                        // Re-attach listener because innerHTML wiped it
-                        document.getElementById('gas-undo-cancel').addEventListener('click', handleCancel);
                     }
                 }, 1000);
-
-                const handleCancel = () => {
-                    clearInterval(interval);
-                    toast.classList.remove('visible');
-                    setTimeout(() => toast.remove(), 300);
-                    resolve(false); // Cancelled
-                };
-
-                // Initial listener
-                toast.querySelector('#gas-undo-cancel').addEventListener('click', handleCancel);
             });
         }
     };
@@ -510,10 +567,21 @@
             const totalProcessed = counts.success + counts.fail + 1;
             const total = parseInt(sessionStorage.getItem(aBULK_DELETE_TOTAL_KEY) || '0');
 
-            const progressHTML =
-                `<span style="font-size: 1.2em;">🔥</span> <span>Deleting... (${totalProcessed})</span>`;
+            // const progressHTML =
+            //    `<span style="font-size: 1.2em;">🔥</span> <span>Deleting... (${totalProcessed})</span>`;
 
-            if (uiElements.allBtn) uiElements.allBtn.innerHTML = progressHTML;
+            if (uiElements.allBtn) {
+                // uiElements.allBtn.innerHTML = progressHTML;
+                // Safe DOM update
+                while (uiElements.allBtn.firstChild) uiElements.allBtn.removeChild(uiElements.allBtn.firstChild);
+                const icon = document.createElement('span');
+                icon.style.fontSize = '1.2em';
+                icon.textContent = '🔥';
+                const text = document.createElement('span');
+                text.textContent = `Deleting... (${totalProcessed})`;
+                uiElements.allBtn.appendChild(icon);
+                uiElements.allBtn.appendChild(text);
+            }
 
             // Update Progress Bar
             UI.updateProgress(totalProcessed, total, `Deleting ${totalProcessed} of ${total}...`);
@@ -556,8 +624,17 @@
         } else {
             if (uiElements.allBtn) {
                 uiElements.allBtn.disabled = false;
-                uiElements.allBtn.innerHTML =
-                    `<span style="font-size: 1.2em;">🔥</span> <span>Delete All</span>`;
+                // uiElements.allBtn.innerHTML =
+                //    `<span style="font-size: 1.2em;">🔥</span> <span>Delete All</span>`;
+                // Safe DOM update
+                while (uiElements.allBtn.firstChild) uiElements.allBtn.removeChild(uiElements.allBtn.firstChild);
+                const icon = document.createElement('span');
+                icon.style.fontSize = '1.2em';
+                icon.textContent = '🔥';
+                const text = document.createElement('span');
+                text.textContent = 'Delete All';
+                uiElements.allBtn.appendChild(icon);
+                uiElements.allBtn.appendChild(text);
             }
             if (uiElements.selBtn) uiElements.selBtn.disabled = false;
             if (uiElements.stopBtn) uiElements.stopBtn.style.display = 'none';
@@ -667,12 +744,16 @@
             );
             if (!userConfirmation) return;
 
+            await sleep(250); // Give modal time to close
+
             // Undo Timer
             const proceed = await UI.showUndoToast(5);
             if (!proceed) {
                 UI.showToast("Deletion Cancelled.", 'info');
                 return;
             }
+
+            await sleep(250); // Give toast time to start closing if needed
 
             sessionStorage.setItem(aBULK_DELETE_ALL_KEY, 'true');
             resetCounts();
@@ -730,6 +811,8 @@
             return link ? link.getAttribute('href') : null;
         }).filter(Boolean);
 
+        console.log('[GAS Bulk Delete] Selected hrefs:', itemHrefs);
+
         const key = aBULK_DELETE_SELECTED_KEY;
         sessionStorage.setItem(key, JSON.stringify(itemHrefs));
 
@@ -741,10 +824,10 @@
     }
 
     function addCheckboxesToRows() {
-        // Only run if we are on the library page
-        if (!location.href.includes('/library')) return;
+        // Only run if we are on the library page (relaxed check)
+        // if (!location.href.includes('/library')) return;
 
-        const rows = document.querySelectorAll('tbody tr.mat-mdc-row');
+        const rows = document.querySelectorAll('tbody tr[mat-row]');
         rows.forEach(row => {
             if (row.querySelector('.bulk-delete-checkbox-cell')) return;
 
@@ -815,49 +898,10 @@
         headerRow.prepend(th);
     }
 
-    function simulateDelete() {
-        const selector = '.bulk-delete-checkbox:checked';
-        const selectedCheckboxes = document.querySelectorAll(selector);
-
-        let targets = [];
-        if (selectedCheckboxes.length > 0) {
-            targets = Array.from(selectedCheckboxes).map(cb => cb.closest('tr'));
-        } else {
-            // If nothing selected, maybe simulate ALL?
-            // For now, let's just simulate selected if any, or warn.
-            // Actually, user might want to simulate "Delete All".
-            // But "Delete All" deletes everything, so we can just highlight everything.
-            // Let's stick to simulating selection if selection exists, otherwise warn.
-            // Or if user clicks Simulate with nothing selected, maybe we simulate ALL visible?
-            // Let's simulate ALL visible if nothing selected.
-            targets = Array.from(document.querySelectorAll('tbody tr.mat-mdc-row'));
-        }
-
-        if (targets.length === 0) {
-            UI.showToast("No chats found to simulate.", 'warning');
-            return;
-        }
-
-        // Highlight
-        targets.forEach(el => {
-            el.classList.add('bulk-delete-highlight');
-        });
-
-        const mode = selectedCheckboxes.length > 0 ? "Selected" : "All Visible";
-        UI.showToast(`DRY RUN (${mode}): Would delete ${targets.length} chat(s).`, 'info', 4000);
-
-        // Remove highlight after 4 seconds
-        setTimeout(() => {
-            targets.forEach(el => {
-                el.classList.remove('bulk-delete-highlight');
-            });
-        }, 4000);
-    }
-
 
     function addButtons() {
-        // Only run if we are on the library page
-        if (!location.href.includes('/library')) return;
+        // Only run if we are on the library page (relaxed check)
+        // if (!location.href.includes('/library')) return;
 
         // If buttons exist, update references and return
         const existingAll = document.getElementById('bulk-delete-all-button');
@@ -868,82 +912,148 @@
             return;
         }
 
-        const wrapper = document.querySelector('.lib-header .actions-wrapper');
+        // Strategy: Look for the "Open in Drive" button or the search bar container
+        // Based on browser inspection, the header structure is different.
+        // We'll look for the element containing the "Open in Drive" button.
+        let wrapper = null;
+
+        // Try to find the "Open in Drive" button's parent
+        const driveBtn = document.querySelector('a[href*="drive.google.com"]');
+        if (driveBtn) {
+            wrapper = driveBtn.parentElement;
+        }
+
+        // Fallback: Try finding the search bar and inserting before it
+        if (!wrapper) {
+            const searchBar = document.querySelector('ms-library-search-bar');
+            if (searchBar) {
+                wrapper = searchBar.parentElement;
+            }
+        }
+
+        // Fallback: Try the header title
+        if (!wrapper) {
+            const title = document.querySelector('.lib-header-title');
+            if (title) {
+                // Go up to the header container
+                wrapper = title.closest('.lib-header');
+            }
+        }
+
         if (!wrapper) return;
 
-        // Use the EXACT classes from the native "Open in Drive" button
-        const btnClass = 'responsive-button-viewport-medium viewport-small-hidden ms-button-primary';
-
-        // Minimal inline styles to position the buttons and override specific colors.
-        // We rely on the classes above for shape, padding, font, and height.
+        // Common button styles
+        const btnClass = 'mat-mdc-unelevated-button mdc-unelevated-button mat-mdc-button-base';
         const commonStyle = {
-            marginLeft: '10px',
-            cursor: 'pointer',
-            color: 'white',
+            margin: '0 8px',
+            height: '36px',
+            borderRadius: '18px',
+            padding: '0 16px',
+            fontSize: '14px',
+            fontWeight: '500',
+            textTransform: 'none',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: '8px',
-            textDecoration: 'none',
-            border: 'none' // Ensure no border overrides the class
+            boxSizing: 'border-box',
+            cursor: 'pointer',
+            transition: 'background-color 0.2s, box-shadow 0.2s',
+            color: 'white',
+            boxShadow: 'none',
+            border: 'none',
+            verticalAlign: 'middle'
         };
-
-        // --- Simulate Button ---
-        const simulateButton = document.createElement('button');
-        simulateButton.id = 'bulk-delete-simulate-button';
-        simulateButton.setAttribute('ms-button', '');
-        simulateButton.innerHTML =
-            `<span style="font-size: 1.2em;">🧪</span>`;
-        simulateButton.title = "Simulate Deletion (Dry Run)";
-        simulateButton.className = btnClass;
-        Object.assign(simulateButton.style, {
-            ...commonStyle,
-            backgroundColor: '#f4b400', // Yellow/Orange
-            color: '#202124',
-            minWidth: '40px',
-            padding: '0 12px'
-        });
-        simulateButton.onclick = simulateDelete;
 
         // --- Delete All Button ---
         const bulkDeleteAllButton = document.createElement('button');
         bulkDeleteAllButton.id = 'bulk-delete-all-button';
-        // Add 'ms-button' attribute as seen in the native anchor tag
         bulkDeleteAllButton.setAttribute('ms-button', '');
-        bulkDeleteAllButton.innerHTML =
-            `<span style="font-size: 1.2em;">🔥</span> <span>Delete All</span>`;
         bulkDeleteAllButton.className = btnClass;
         Object.assign(bulkDeleteAllButton.style, {
             ...commonStyle,
-            backgroundColor: '#d93025', // Google Red override for 'delete' action
+            backgroundColor: '#d93025', // Google Red override
+            // display: 'none' // Removed to make visible by default
         });
+
+        // Safe DOM update for All button content
+        const allIcon = document.createElement('span');
+        allIcon.style.fontSize = '1.2em';
+        allIcon.textContent = '🔥';
+        const allText = document.createElement('span');
+        allText.textContent = 'Delete All';
+        bulkDeleteAllButton.appendChild(allIcon);
+        bulkDeleteAllButton.appendChild(allText);
+
+        // bulkDeleteAllButton.onclick = () => startBulkDeleteAll(false); // Handled by addEventListener below
 
         // --- Delete Selected Button ---
         const bulkDeleteSelectedButton = document.createElement('button');
         bulkDeleteSelectedButton.id = 'bulk-delete-selected-button';
         bulkDeleteSelectedButton.setAttribute('ms-button', '');
-        bulkDeleteSelectedButton.innerHTML =
-            `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
         bulkDeleteSelectedButton.className = btnClass;
         Object.assign(bulkDeleteSelectedButton.style, {
             ...commonStyle,
             backgroundColor: '#e37400', // Google Orange/Warning override
+            // display: 'none' // Removed to make visible by default
         });
+
+        // Safe DOM update for Selected button content
+        const selIcon = document.createElement('span');
+        selIcon.style.fontSize = '1.2em';
+        selIcon.textContent = '🗑️';
+        const selText = document.createElement('span');
+        selText.textContent = 'Delete Selected';
+        bulkDeleteSelectedButton.appendChild(selIcon);
+        bulkDeleteSelectedButton.appendChild(selText);
+
+        // bulkDeleteSelectedButton.onclick = () => startBulkDeleteSelected(); // Handled by addEventListener below
 
         // --- Stop Button ---
         const stopButton = document.createElement('button');
         stopButton.id = 'stop-bulk-delete-button';
         stopButton.setAttribute('ms-button', '');
-        stopButton.innerHTML =
-            `<span style="font-size: 1.2em;">🛑</span> <span>Stop</span>`;
         stopButton.className = btnClass;
         Object.assign(stopButton.style, {
             ...commonStyle,
-            // No background color override needed here if we want the native Blue (ms-button-primary default)
-            // But explicit is safer if the class logic changes:
-            backgroundColor: '#1a73e8', // Google Blue
+            backgroundColor: '#f4b400', // Google Yellow
+            color: '#202124', // Dark text for contrast
             display: 'none' // Hidden by default
         });
+
+        // Safe DOM update for Stop button content
+        const stopIcon = document.createElement('span');
+        stopIcon.style.fontSize = '1.2em';
+        stopIcon.textContent = '🛑';
+        const stopText = document.createElement('span');
+        stopText.textContent = 'Stop';
+        stopButton.appendChild(stopIcon);
+        stopButton.appendChild(stopText);
+
+        // stopButton.onclick = ... // Handled by addEventListener below
+
+        // Store references
+        uiElements.allBtn = bulkDeleteAllButton;
+        uiElements.selBtn = bulkDeleteSelectedButton;
+        uiElements.stopBtn = stopButton;
+
+        // Inject
+        // If we found the drive button, append after it to keep layout clean
+        if (driveBtn && wrapper === driveBtn.parentElement) {
+            // Create a container to hold our buttons so they stay together
+            const container = document.createElement('div');
+            container.style.display = 'flex';
+            container.style.alignItems = 'center';
+
+            container.appendChild(bulkDeleteAllButton);
+            container.appendChild(bulkDeleteSelectedButton);
+            container.appendChild(stopButton);
+
+            wrapper.insertBefore(container, driveBtn.nextSibling);
+        } else {
+            wrapper.appendChild(bulkDeleteAllButton);
+            wrapper.appendChild(bulkDeleteSelectedButton);
+            wrapper.appendChild(stopButton);
+        }
 
         // --- Hover Effects ---
         // Native buttons typically have a state overlay.
@@ -955,7 +1065,8 @@
         addHover(bulkDeleteAllButton);
         addHover(bulkDeleteSelectedButton);
         addHover(stopButton);
-        addHover(simulateButton);
+        addHover(stopButton);
+
 
         // --- Event Listeners ---
         stopButton.addEventListener('click', () => {
@@ -963,8 +1074,18 @@
             sessionStorage.removeItem(aBULK_DELETE_ALL_KEY);
             sessionStorage.removeItem(aBULK_DELETE_SELECTED_KEY);
             clearCounts();
-            stopButton.innerHTML = `<span style="font-size: 1.2em;">🛑</span> <span>Stopping...</span>`;
             stopButton.disabled = true;
+
+            // Safe DOM update for Stop button text
+            while (stopButton.firstChild) stopButton.removeChild(stopButton.firstChild);
+            const stopIcon = document.createElement('span');
+            stopIcon.style.fontSize = '1.2em';
+            stopIcon.textContent = '🛑';
+            const stopText = document.createElement('span');
+            stopText.textContent = 'Stopping...';
+            stopButton.appendChild(stopIcon);
+            stopButton.appendChild(stopText);
+
             UI.showToast(
                 "Bulk delete will stop. The page will not reload after the current action.",
                 'info',
@@ -980,7 +1101,6 @@
         );
 
         // Append to DOM
-        wrapper.appendChild(simulateButton);
         wrapper.appendChild(bulkDeleteSelectedButton);
         wrapper.appendChild(bulkDeleteAllButton);
         wrapper.appendChild(stopButton);
@@ -1008,14 +1128,21 @@
      * deletion process.
      */
     function handleAutoDeletion() {
-        if (isProcessing) return; // Already running
+        console.log('[GAS Bulk Delete] handleAutoDeletion called');
+        if (isProcessing) {
+            console.log('[GAS Bulk Delete] Already processing, returning');
+            return; // Already running
+        }
 
         if (sessionStorage.getItem(aBULK_DELETE_ALL_KEY) === 'true') {
+            console.log('[GAS Bulk Delete] Starting bulk delete all');
             startBulkDeleteAll(true);
 
         } else if (sessionStorage.getItem(aBULK_DELETE_SELECTED_KEY)) {
+            console.log('[GAS Bulk Delete] Found selected deletion in progress');
             const key = aBULK_DELETE_SELECTED_KEY;
             let itemHrefs = JSON.parse(sessionStorage.getItem(key));
+            console.log('[GAS Bulk Delete] ItemHrefs from storage:', itemHrefs);
 
             if (itemHrefs.length > 0) {
                 // Update UI for selected deletion
@@ -1031,17 +1158,28 @@
                 UI.updateProgress(current, total);
 
                 const nextHref = itemHrefs[0];
+                console.log('[GAS Bulk Delete] Looking for href:', nextHref);
                 const linkSelector = `a.name-btn[href="${nextHref}"]`;
+                console.log('[GAS Bulk Delete] Using selector:', linkSelector);
                 const nextLink = document.querySelector(linkSelector);
+                console.log('[GAS Bulk Delete] Found link:', nextLink);
 
                 if (nextLink) {
-                    const progressHTML =
-                        `<span style="font-size: 1.2em;">🗑️</span> ` +
-                        `<span>Deleting ${itemHrefs.length} selected...</span>`;
-                    if (uiElements.selBtn) uiElements.selBtn.innerHTML = progressHTML;
+                    // Safe DOM update for Selected button progress
+                    if (uiElements.selBtn) {
+                        while (uiElements.selBtn.firstChild) uiElements.selBtn.removeChild(uiElements.selBtn.firstChild);
+                        const icon = document.createElement('span');
+                        icon.style.fontSize = '1.2em';
+                        icon.textContent = '🗑️';
+                        const text = document.createElement('span');
+                        text.textContent = `Deleting ${itemHrefs.length} selected...`;
+                        uiElements.selBtn.appendChild(icon);
+                        uiElements.selBtn.appendChild(text);
+                    }
 
                     const itemMenu = nextLink.closest('tr')
                         .querySelector('ms-prompt-options-menu button');
+                    console.log('[GAS Bulk Delete] Found menu button:', itemMenu);
 
                     deleteSingleItemAndReload(itemMenu, () => {
                         itemHrefs.shift(); // Remove processed item
@@ -1080,19 +1218,33 @@
         const btn = uiElements.selBtn;
 
         if (btn) {
+            // Clear current content
+            while (btn.firstChild) btn.removeChild(btn.firstChild);
+
+            const icon = document.createElement('span');
+            icon.style.fontSize = '1.2em';
+            icon.textContent = '🗑️';
+
+            const text = document.createElement('span');
+
             if (selectedCount > 0) {
                 btn.disabled = false;
-                btn.innerHTML = `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected (${selectedCount})</span>`;
+                text.textContent = `Delete Selected (${selectedCount})`;
             } else {
-                btn.disabled = true; // Optional: disable if nothing selected, like Gemini
-                btn.innerHTML = `<span style="font-size: 1.2em;">🗑️</span> <span>Delete Selected</span>`;
+                btn.disabled = true;
+                text.textContent = 'Delete Selected';
             }
+
+            btn.appendChild(icon);
+            btn.appendChild(text);
         }
     }
 
     function manageUI() {
         // If we are on the library page, attempt to inject UI
-        if (location.href.includes('/library')) {
+        // Relaxed check: just look for the table or header
+        const libraryTable = document.querySelector('ms-library-table') || document.querySelector('.library-table');
+        if (libraryTable || location.href.includes('/library')) {
             addButtons();
             addCheckboxesToRows();
         }
